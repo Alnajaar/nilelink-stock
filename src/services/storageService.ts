@@ -220,48 +220,49 @@ export class StorageService {
       }
       this.savePendingQueue(queue);
 
-      // Attempt network push to full-stack backend endpoint
-      try {
-        const response = await fetch('/api/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            cafeId: cafeId || 'global',
-            actions: itemsToSync
-          })
-        });
-
-        if (!response.ok) throw new Error(`Sync server responded with ${response.status}`);
-        const result = await response.json() as { success?: boolean; syncedCount?: number };
-        if (result.success !== true || result.syncedCount !== itemsToSync.length) {
-          throw new Error('Sync server did not confirm every queued operation.');
-        }
-      } catch (networkErr) {
-        if (!this.isOnline()) {
-          for (const action of itemsToSync) {
-            action.status = 'pending';
-            IndexedDBService.updateSyncActionStatus(action.id, 'pending').catch(() => {});
-          }
-          this.savePendingQueue(queue);
-          return { syncedCount: 0, errors: itemsToSync.length };
-        }
-        const message = networkErr instanceof Error ? networkErr.message : 'The sync request failed.';
-        for (const action of itemsToSync) {
-          action.status = 'failed';
-          action.error = message;
-          action.retryCount = (action.retryCount || 0) + 1;
-          IndexedDBService.updateSyncActionStatus(action.id, 'failed').catch(() => {});
-        }
-        this.savePendingQueue(queue);
-        return { syncedCount: 0, errors: itemsToSync.length };
+      const syncedTenantIds = new Set<string>();
+      const actionsByTenant = new Map<string, PendingSyncAction[]>();
+      for (const action of itemsToSync) {
+        const tenantActions = actionsByTenant.get(action.cafeId) || [];
+        tenantActions.push(action);
+        actionsByTenant.set(action.cafeId, tenantActions);
       }
 
-      // Reconcile and commit action successfully
-      for (const action of itemsToSync) {
-        action.status = 'synced';
-        action.retryCount = (action.retryCount || 0) + 1;
-        IndexedDBService.updateSyncActionStatus(action.id, 'synced').catch(() => {});
-        syncedCount++;
+      for (const [tenantId, tenantActions] of actionsByTenant) {
+        for (let offset = 0; offset < tenantActions.length; offset += 100) {
+          const batch = tenantActions.slice(offset, offset + 100);
+          try {
+            const response = await fetch('/api/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ cafeId: tenantId, actions: batch })
+            });
+            if (!response.ok) throw new Error(`Sync server responded with ${response.status}`);
+            const result = await response.json() as { success?: boolean; syncedCount?: number };
+            if (result.success !== true || result.syncedCount !== batch.length) {
+              throw new Error('Sync server did not confirm every queued operation.');
+            }
+            for (const action of batch) {
+              action.status = 'synced';
+              action.error = undefined;
+              action.retryCount = (action.retryCount || 0) + 1;
+              IndexedDBService.updateSyncActionStatus(action.id, 'synced').catch(() => {});
+              syncedCount++;
+            }
+            syncedTenantIds.add(tenantId);
+          } catch (syncError) {
+            const isOffline = !this.isOnline();
+            const message = syncError instanceof Error ? syncError.message : 'The sync request failed.';
+            for (const action of batch) {
+              action.status = isOffline ? 'pending' : 'failed';
+              action.error = isOffline ? undefined : message;
+              if (!isOffline) action.retryCount = (action.retryCount || 0) + 1;
+              IndexedDBService.updateSyncActionStatus(action.id, action.status).catch(() => {});
+              errors++;
+            }
+          }
+        }
       }
 
       // Retain max 50 records for local audit trail
@@ -272,6 +273,10 @@ export class StorageService {
       this.lastSyncedTime = new Date().toISOString();
       IndexedDBService.setMeta('lastSyncedAt', this.lastSyncedTime).catch(() => {});
       this.savePendingQueue(trimmedQueue);
+      if (typeof window !== 'undefined') {
+        const tenantIds = [...syncedTenantIds];
+        window.dispatchEvent(new CustomEvent('nilelink:inventory-synced', { detail: { tenantIds } }));
+      }
 
       return { syncedCount, errors };
     } catch (err: any) {
@@ -425,7 +430,14 @@ export class StorageService {
     this.enqueueAction(
       cafeId,
       'STOCK_OUT',
-      { cartItems, takenBy, destination },
+      {
+        cartItems: cartItems.map(cart => ({
+          ...cart,
+          itemId: items.find(item => item.name.toLowerCase() === cart.name.toLowerCase())?.id
+        })),
+        takenBy,
+        destination
+      },
       `Take to ${destination}: ${summaryText} by ${takenBy}`
     );
 
@@ -498,7 +510,7 @@ export class StorageService {
     this.enqueueAction(
       cafeId,
       'STOCK_IN',
-      { itemName, qty, supplier, receivedBy, invoiceNo },
+      { itemId: item.id, itemName: item.name, qty, supplier, receivedBy, invoiceNo },
       `Stock In: +${qty} ${item.unit} ${item.name} (${supplier})`
     );
 
@@ -569,7 +581,7 @@ export class StorageService {
     this.enqueueAction(
       cafeId,
       'WASTE',
-      { itemName, qty, reason, recordedBy, shift: finalShift },
+      { itemId: item.id, itemName: item.name, qty, reason, recordedBy, shift: finalShift },
       `Waste Log: ${qty} ${item.unit} ${item.name} (${reason} · ${finalShift} Shift)`
     );
 
@@ -862,7 +874,7 @@ export class StorageService {
     this.enqueueAction(
       cafeId,
       'STOCK_COUNT',
-      { type, itemName, physicalQty, countedBy, notes },
+      { itemId: item.id, type, itemName, physicalQty, countedBy, notes },
       `Audit Count: ${itemName} = ${physicalQty} (diff: ${diff >= 0 ? '+' : ''}${diff})`
     );
 

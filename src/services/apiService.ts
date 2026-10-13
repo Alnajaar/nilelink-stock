@@ -1,4 +1,4 @@
-import { CafeTenant, Employee, SubscriptionPlan, UserRole } from '../types/stock';
+import { CafeTenant, Employee, StockItem, SubscriptionPlan, UserRole } from '../types/stock';
 import { StorageService } from './storageService';
 import { PublicSiteContent } from '../types/content';
 
@@ -186,6 +186,28 @@ export class ApiService {
       throw new Error('The server returned invalid public website content.');
     }
     return data.content;
+  }
+
+  public static async getInventory(tenantId: string): Promise<StockItem[]> {
+    const query = new URLSearchParams({ tenantId });
+    const response = await fetch(`${this.baseUrl}/inventory?${query}`, { credentials: 'same-origin' });
+    const data = await this.readResponse<{ items: StockItem[] }>(response);
+    if (!Array.isArray(data.items)) throw new Error('The server returned an invalid inventory list.');
+    return data.items;
+  }
+
+  public static async saveInventory(
+    tenantId: string,
+    items: StockItem[],
+    includedOperationIds: string[] = []
+  ): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/inventory`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ tenantId, items, operationIds: includedOperationIds })
+    });
+    await this.readResponse(response);
   }
 
   public static async updatePlan(plan: SubscriptionPlan, published = true): Promise<SubscriptionPlan> {

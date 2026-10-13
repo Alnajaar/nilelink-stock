@@ -107,6 +107,19 @@ CREATE TABLE inventory_events (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE inventory_items (
+  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  current_stock REAL NOT NULL CHECK (current_stock >= 0),
+  data_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (tenant_id, id),
+  UNIQUE (tenant_id, name COLLATE NOCASE)
+);
+
+CREATE INDEX inventory_items_tenant_name_idx ON inventory_items(tenant_id, name COLLATE NOCASE);
+
 CREATE TABLE sync_operations (
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   operation_id TEXT NOT NULL,

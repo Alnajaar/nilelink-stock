@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { StorageService } from './services/storageService';
 import { LicenseManager } from './services/licenseService';
 import {
@@ -87,6 +87,7 @@ export default function App() {
   const [wasteLogs, setWasteLogs] = useState<WasteLog[]>([]);
   const [stockCounts, setStockCounts] = useState<StockCountRecord[]>([]);
   const [branchTransfers, setBranchTransfers] = useState<BranchTransfer[]>([]);
+  const inventoryLoadVersion = useRef(0);
 
   // Modals & Notifications
   const [isAddItemOpen, setIsAddItemOpen] = useState(false);
@@ -108,6 +109,30 @@ export default function App() {
     setWasteLogs(StorageService.getWasteLogs(cafeId));
     setStockCounts(StorageService.getStockCounts(cafeId));
     setBranchTransfers(StorageService.getBranchTransfers(cafeId));
+  }, []);
+
+  const loadInventoryFromServer = useCallback(async (tenantId: string) => {
+    const requestVersion = ++inventoryLoadVersion.current;
+    try {
+      const serverItems = await ApiService.getInventory(tenantId);
+      if (requestVersion !== inventoryLoadVersion.current) return;
+      if (serverItems.length === 0) {
+        const cachedItems = StorageService.getItems(tenantId);
+        if (cachedItems.length > 0) {
+          const includedOperationIds = StorageService.getPendingQueue()
+            .filter(action => action.cafeId === tenantId &&
+              (action.status === 'pending' || action.status === 'failed' || action.status === 'syncing'))
+            .map(action => action.id);
+          await ApiService.saveInventory(tenantId, cachedItems, [...new Set(includedOperationIds)]);
+          if (requestVersion !== inventoryLoadVersion.current) return;
+          return;
+        }
+      }
+      StorageService.saveItems(tenantId, serverItems);
+      setItems(serverItems);
+    } catch (error) {
+      console.error('Could not load authoritative inventory:', error);
+    }
   }, []);
 
   // Initialize tenants and load active tenant data (support URL access code)
@@ -195,6 +220,7 @@ export default function App() {
           setActiveCafe(tenant);
           setLicense(LicenseManager.getLicenseStatus(tenant.id, tenant.name));
           loadTenantData(tenant.id);
+          void loadInventoryFromServer(tenant.id);
           setCurrentUser({
             id: user.id,
             name: user.name,
@@ -216,7 +242,7 @@ export default function App() {
     }).catch(error => {
       if (!import.meta.env.DEV) console.error('Could not restore authenticated session:', error);
     });
-  }, [loadTenantData]);
+  }, [loadInventoryFromServer, loadTenantData]);
 
   // Background Web Push check when items update
   useEffect(() => {
@@ -224,6 +250,17 @@ export default function App() {
       NotificationService.checkStockAndAlert(items, activeCafe.name);
     }
   }, [items, activeCafe]);
+
+  useEffect(() => {
+    const handleInventorySync = (event: Event) => {
+      const detail = (event as CustomEvent<{ tenantIds?: string[] }>).detail;
+      if (activeCafe && detail?.tenantIds?.includes(activeCafe.id)) {
+        void loadInventoryFromServer(activeCafe.id);
+      }
+    };
+    window.addEventListener('nilelink:inventory-synced', handleInventorySync);
+    return () => window.removeEventListener('nilelink:inventory-synced', handleInventorySync);
+  }, [activeCafe, loadInventoryFromServer]);
 
   const handleSelectCafe = (tenant: CafeTenant) => {
     StorageService.setActiveTenantId(tenant.id);
@@ -268,6 +305,7 @@ export default function App() {
 
   const handleLoginSuccess = (user: Employee) => {
     setCurrentUser(user);
+    if (!import.meta.env.DEV && activeCafe) void loadInventoryFromServer(activeCafe.id);
     if (!import.meta.env.DEV && activeCafe && ['admin', 'manager'].includes(user.role)) {
       ApiService.getEmployees(activeCafe.id).then(setEmployees).catch(error => {
         showToast(error instanceof Error ? error.message : 'Could not load team members.', 'err');
@@ -331,6 +369,7 @@ export default function App() {
     setActiveCafe(tenant);
     setLicense(LicenseManager.getLicenseStatus(tenant.id, tenant.name));
     loadTenantData(tenant.id);
+    void loadInventoryFromServer(tenant.id);
     ApiService.getEmployees(tenant.id).then(setEmployees).catch(error => {
       showToast(error instanceof Error ? error.message : 'Could not load team members.', 'err');
     });
@@ -522,8 +561,16 @@ export default function App() {
   };
 
   // Bulk Catalog Import
-  const handleImportItems = (importedItems: StockItem[]) => {
+  const handleImportItems = async (importedItems: StockItem[]) => {
     if (!activeCafe) return;
+    if (!import.meta.env.DEV) {
+      try {
+        await ApiService.saveInventory(activeCafe.id, importedItems);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Could not save inventory to the server.', 'err');
+        return;
+      }
+    }
     StorageService.saveItems(activeCafe.id, importedItems);
     setItems(importedItems);
     showToast(`Updated catalog with ${importedItems.length} items from spreadsheet!`, 'ok');
@@ -619,6 +666,7 @@ export default function App() {
             loadTenantData(tenant.id);
             if (user) {
               setCurrentUser(user);
+              if (!import.meta.env.DEV) void loadInventoryFromServer(tenant.id);
               setCurrentTab(user.role === 'admin' ? 'overview' : 'take');
             } else {
               setCurrentUser(null);
@@ -802,7 +850,7 @@ export default function App() {
           />
         )}
 
-        {currentTab === 'transfer' && (
+        {currentTab === 'transfer' && import.meta.env.DEV && (
           <BranchTransferScreen
             currentCafe={activeCafe}
             availableBranches={availableBranches}
@@ -815,6 +863,16 @@ export default function App() {
             }}
             onShowToast={showToast}
           />
+        )}
+
+        {currentTab === 'transfer' && !import.meta.env.DEV && (
+          <div className="m-6 rounded-2xl border border-amber-700/60 bg-amber-950/40 p-6 text-amber-100">
+            <h2 className="text-lg font-bold">Branch transfers are not available yet</h2>
+            <p className="mt-2 text-sm text-amber-200/80">
+              Cross-branch inventory and branch setup are not yet stored in the cloud. Transfers are disabled
+              here so stock cannot appear to move without being saved centrally.
+            </p>
+          </div>
         )}
 
         {currentTab === 'excel' && (

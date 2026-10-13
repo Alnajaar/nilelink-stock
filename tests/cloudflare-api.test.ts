@@ -164,6 +164,162 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
     });
     assert.equal(otherRegistration.status, 200);
     const otherTenant = await otherRegistration.json() as { tenant: { id: string } };
+    const otherCookie = otherRegistration.headers.get('set-cookie')?.split(';')[0];
+    assert.ok(otherCookie);
+
+    const initialInventory = [{
+      id: 'milk-item-1',
+      name: 'Whole Milk',
+      category: 'Dairy',
+      unit: 'litre',
+      openingStock: 10,
+      currentStock: 10,
+      minLevel: 2,
+      maxLevel: 20,
+      totalIn: 0,
+      totalOut: 0,
+      totalWaste: 0,
+      lastUpdated: new Date().toISOString()
+    }];
+    const inventorySave = await call('/api/inventory', 'PUT', {
+      tenantId: registrationData.tenant.id,
+      items: initialInventory,
+      operationIds: ['operation-included-in-snapshot']
+    }, cookie);
+    assert.equal(inventorySave.status, 200, await inventorySave.clone().text());
+    const inventoryLoad = await call(
+      `/api/inventory?tenantId=${registrationData.tenant.id}`,
+      'GET',
+      undefined,
+      cookie
+    );
+    assert.equal(inventoryLoad.status, 200);
+    assert.equal(((await inventoryLoad.json()) as { items: unknown[] }).items.length, 1);
+    const crossTenantInventory = await call(
+      `/api/inventory?tenantId=${registrationData.tenant.id}`,
+      'GET',
+      undefined,
+      otherCookie
+    );
+    assert.equal(crossTenantInventory.status, 403);
+
+    const includedOperationReplay = await call('/api/sync', 'POST', {
+      cafeId: registrationData.tenant.id,
+      actions: [{
+        id: 'operation-included-in-snapshot',
+        actionType: 'STOCK_OUT',
+        payload: { cartItems: [{ itemId: 'milk-item-1', name: 'Whole Milk', qty: 3 }] }
+      }]
+    }, cookie);
+    assert.equal(includedOperationReplay.status, 200);
+    const inventoryAfterReplay = await call(
+      `/api/inventory?tenantId=${registrationData.tenant.id}`,
+      'GET',
+      undefined,
+      cookie
+    );
+    assert.equal(
+      ((await inventoryAfterReplay.json()) as { items: Array<{ currentStock: number }> }).items[0].currentStock,
+      10
+    );
+
+    const stockOutAction = {
+      id: 'operation-stock-out-1',
+      cafeId: registrationData.tenant.id,
+      actionType: 'STOCK_OUT',
+      payload: { cartItems: [{ itemId: 'milk-item-1', name: 'Whole Milk', qty: 3 }] },
+      timestamp: new Date().toISOString()
+    };
+    const stockOut = await call('/api/sync', 'POST', {
+      cafeId: registrationData.tenant.id,
+      actions: [stockOutAction]
+    }, cookie);
+    assert.equal(stockOut.status, 200, await stockOut.clone().text());
+    const repeatedStockOut = await call('/api/sync', 'POST', {
+      cafeId: registrationData.tenant.id,
+      actions: [stockOutAction]
+    }, cookie);
+    assert.equal(repeatedStockOut.status, 200);
+    const inventoryAfterSync = await call(
+      `/api/inventory?tenantId=${registrationData.tenant.id}`,
+      'GET',
+      undefined,
+      cookie
+    );
+    const afterStockOut = (await inventoryAfterSync.json()) as { items: Array<{ currentStock: number; totalOut: number }> };
+    assert.equal(afterStockOut.items[0].currentStock, 7);
+    assert.equal(afterStockOut.items[0].totalOut, 3);
+
+    const stockIn = await call('/api/sync', 'POST', {
+      cafeId: registrationData.tenant.id,
+      actions: [{
+        id: 'operation-stock-in-1',
+        actionType: 'STOCK_IN',
+        payload: { itemId: 'milk-item-1', itemName: 'Whole Milk', qty: 2 }
+      }]
+    }, cookie);
+    assert.equal(stockIn.status, 200, await stockIn.clone().text());
+    const waste = await call('/api/sync', 'POST', {
+      cafeId: registrationData.tenant.id,
+      actions: [{
+        id: 'operation-waste-1',
+        actionType: 'WASTE',
+        payload: { itemId: 'milk-item-1', itemName: 'Whole Milk', qty: 1 }
+      }]
+    }, cookie);
+    assert.equal(waste.status, 200, await waste.clone().text());
+    const inventoryAfterMovements = await call(
+      `/api/inventory?tenantId=${registrationData.tenant.id}`,
+      'GET',
+      undefined,
+      cookie
+    );
+    const movementTotals = (await inventoryAfterMovements.json()) as {
+      items: Array<{ currentStock: number; totalIn: number; totalOut: number; totalWaste: number }>;
+    };
+    assert.deepEqual(
+      [
+        movementTotals.items[0].currentStock,
+        movementTotals.items[0].totalIn,
+        movementTotals.items[0].totalOut,
+        movementTotals.items[0].totalWaste
+      ],
+      [8, 2, 3, 1]
+    );
+
+    const unsupportedBranchTransfer = await call('/api/sync', 'POST', {
+      cafeId: registrationData.tenant.id,
+      actions: [{
+        id: 'operation-branch-transfer-1',
+        actionType: 'BRANCH_TRANSFER',
+        payload: { newTransfer: { id: 'transfer-1' } }
+      }]
+    }, cookie);
+    assert.equal(unsupportedBranchTransfer.status, 400);
+
+    const metadataUpdate = await call('/api/sync', 'POST', {
+      cafeId: registrationData.tenant.id,
+      actions: [{
+        id: 'operation-item-metadata-1',
+        actionType: 'UPDATE_ITEM',
+        payload: { item: { ...initialInventory[0], category: 'Chilled Dairy' } }
+      }]
+    }, cookie);
+    assert.equal(metadataUpdate.status, 200, await metadataUpdate.clone().text());
+    const inventoryAfterMetadata = await call(
+      `/api/inventory?tenantId=${registrationData.tenant.id}`,
+      'GET',
+      undefined,
+      cookie
+    );
+    const preservedStock = (await inventoryAfterMetadata.json()) as {
+      items: Array<{ currentStock: number; totalOut: number; category: string }>;
+    };
+    assert.deepEqual(
+      [preservedStock.items[0].currentStock, preservedStock.items[0].totalOut, preservedStock.items[0].category],
+      [8, 3, 'Chilled Dairy']
+    );
+
     const crossTenantEntries = await call(
       `/api/workforce/time-entries?tenantId=${otherTenant.tenant.id}&from=${new Date().toISOString().slice(0, 10)}&to=${new Date().toISOString().slice(0, 10)}`,
       'GET',

@@ -84,9 +84,9 @@ export async function onRequest(context: {
       try {
         const probe = await requireDatabase(env).prepare(
           `SELECT COUNT(*) AS count FROM sqlite_master
-           WHERE type = 'table' AND name IN ('users', 'tenants', 'plans', 'time_entries')`
+           WHERE type = 'table' AND name IN ('users', 'tenants', 'plans', 'time_entries', 'inventory_items')`
         ).first<{ count: number }>();
-        databaseReady = Number(probe?.count) === 4;
+        databaseReady = Number(probe?.count) === 5;
       } catch (error) {
         console.error('Health check could not verify D1 readiness.', {
           error: error instanceof Error ? error.message : 'Unknown error'
@@ -221,6 +221,36 @@ export async function onRequest(context: {
       const user = await requireSession(request, env);
       requireRole(user, ['platform_admin']);
       return await updateContent(requireDatabase(env), request, user);
+    }
+
+    if (url.pathname === '/api/inventory' && request.method === 'GET') {
+      const tenantId = url.searchParams.get('tenantId') || '';
+      const user = await requireTenantRole(request, env, tenantId, ['owner', 'admin', 'manager', 'teamlead', 'staff']);
+      const { results } = await requireDatabase(env).prepare(
+        'SELECT data_json AS dataJson FROM inventory_items WHERE tenant_id = ? ORDER BY name COLLATE NOCASE'
+      ).bind(tenantId).all<{ dataJson: string }>();
+      return json({ success: true, items: results.map(row => JSON.parse(row.dataJson)) });
+    }
+
+    if (url.pathname === '/api/inventory' && request.method === 'PUT') {
+      requireSameOrigin(request);
+      const body = await readJson<{ tenantId?: unknown; items?: unknown; operationIds?: unknown }>(request, 512_000);
+      if (typeof body.tenantId !== 'string' || !Array.isArray(body.items) ||
+          body.items.length < 1 || body.items.length > 5_000 ||
+          (body.operationIds !== undefined && (!Array.isArray(body.operationIds) || body.operationIds.length > 1_000))) {
+        throw new HttpError(400, 'A tenant and 1–5,000 inventory items are required.');
+      }
+      const operationIds = (body.operationIds || []).map(value => {
+        if (typeof value !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(value)) {
+          throw new HttpError(400, 'Invalid inventory snapshot operation ID.');
+        }
+        return value;
+      });
+      if (new Set(operationIds).size !== operationIds.length) {
+        throw new HttpError(400, 'Inventory snapshot operation IDs must be unique.');
+      }
+      const user = await requireTenantRole(request, env, body.tenantId, ['owner', 'admin', 'manager']);
+      return await saveInventory(requireDatabase(env), user.tenantId || body.tenantId, user, body.items, operationIds);
     }
 
     if (url.pathname === '/api/sync' && request.method === 'POST') {
@@ -452,6 +482,135 @@ async function updateContent(db: D1Database, request: Request, actor: Authentica
   return json({ success: true, content: clean, version, published: publish });
 }
 
+async function saveInventory(
+  db: D1Database,
+  tenantId: string,
+  actor: AuthenticatedUser,
+  rawItems: unknown[],
+  operationIds: string[]
+): Promise<Response> {
+  const plan = await db.prepare(
+    `SELECT p.max_items AS maxItems FROM tenants t JOIN plans p ON p.id = t.plan_id
+     WHERE t.id = ?`
+  ).bind(tenantId).first<{ maxItems: number }>();
+  if (!plan) throw new HttpError(404, 'Tenant was not found.');
+
+  const items = rawItems.map(validateInventoryItem);
+  const ids = new Set<string>();
+  const names = new Set<string>();
+  for (const item of items) {
+    if (ids.has(item.id) || names.has(item.name.toLocaleLowerCase())) {
+      throw new HttpError(400, 'Inventory items must have unique IDs and names.');
+    }
+    ids.add(item.id);
+    names.add(item.name.toLocaleLowerCase());
+  }
+
+  const existing = await db.prepare(
+    'SELECT COUNT(*) AS count FROM inventory_items WHERE tenant_id = ?'
+  ).bind(tenantId).first<{ count: number }>();
+  const existingIds = new Set<string>();
+  for (let index = 0; index < items.length; index += 100) {
+    const batch = items.slice(index, index + 100);
+    const result = await db.prepare(
+      `SELECT id FROM inventory_items WHERE tenant_id = ?
+       AND id IN (${batch.map(() => '?').join(',')})`
+    ).bind(tenantId, ...batch.map(item => item.id)).all<{ id: string }>();
+    result.results.forEach(row => existingIds.add(row.id));
+  }
+  const newItemCount = items.length - existingIds.size;
+  if (Number(existing?.count || 0) + newItemCount > plan.maxItems) {
+    throw new HttpError(409, 'This inventory exceeds the item limit for the current plan.');
+  }
+
+  const now = new Date().toISOString();
+  const statements = items.map(item => db.prepare(
+    `INSERT INTO inventory_items (tenant_id, id, name, current_stock, data_json, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT (tenant_id, id) DO UPDATE SET
+       name = excluded.name, current_stock = excluded.current_stock,
+       data_json = excluded.data_json, updated_at = excluded.updated_at`
+  ).bind(tenantId, item.id, item.name, item.currentStock, JSON.stringify(item), now));
+  for (let index = 0; index < statements.length; index += 100) {
+    await db.batch(statements.slice(index, index + 100));
+  }
+  const operationStatements = operationIds.map(operationId => db.prepare(
+    `INSERT OR IGNORE INTO sync_operations (tenant_id, operation_id, result_json, created_at)
+     VALUES (?, ?, ?, ?)`
+  ).bind(
+    tenantId,
+    operationId,
+    JSON.stringify({ operationId, accepted: true, includedInSnapshot: true }),
+    now
+  ));
+  for (let index = 0; index < operationStatements.length; index += 100) {
+    await db.batch(operationStatements.slice(index, index + 100));
+  }
+  await audit(db, actor.id, tenantId, 'inventory.snapshot_saved', 'inventory', tenantId, {
+    itemCount: items.length,
+    includedPendingOperationCount: operationIds.length
+  });
+  return json({ success: true, savedCount: items.length });
+}
+
+interface InventoryItemRecord {
+  id: string;
+  name: string;
+  category: string;
+  unit: string;
+  openingStock: number;
+  currentStock: number;
+  minLevel: number;
+  maxLevel: number;
+  totalIn: number;
+  totalOut: number;
+  totalWaste: number;
+  unitCost?: number;
+  supplierId?: string;
+  barcode?: string;
+  sku?: string;
+  lastUpdated: string;
+}
+
+function validateInventoryItem(value: unknown): InventoryItemRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new HttpError(400, 'Invalid inventory item.');
+  }
+  const item = value as Record<string, unknown>;
+  if (typeof item.id !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(item.id)) {
+    throw new HttpError(400, 'Invalid inventory item ID.');
+  }
+  const bounded = (field: string, max: number) => boundedString(item[field], field, 1, max);
+  const amount = (field: string, optional = false): number | undefined => {
+    const input = item[field];
+    if (optional && input === undefined) return undefined;
+    if (typeof input !== 'number' || !Number.isFinite(input) || input < 0 || input > 1_000_000_000) {
+      throw new HttpError(400, `Invalid inventory ${field}.`);
+    }
+    return input;
+  };
+  return {
+    id: item.id,
+    name: bounded('name', 160),
+    category: bounded('category', 80),
+    unit: bounded('unit', 40),
+    openingStock: amount('openingStock')!,
+    currentStock: amount('currentStock')!,
+    minLevel: amount('minLevel')!,
+    maxLevel: amount('maxLevel')!,
+    totalIn: amount('totalIn')!,
+    totalOut: amount('totalOut')!,
+    totalWaste: amount('totalWaste')!,
+    unitCost: amount('unitCost', true),
+    supplierId: item.supplierId === undefined ? undefined : bounded('supplierId', 100),
+    barcode: item.barcode === undefined ? undefined : bounded('barcode', 160),
+    sku: item.sku === undefined ? undefined : bounded('sku', 100),
+    lastUpdated: typeof item.lastUpdated === 'string' && !Number.isNaN(Date.parse(item.lastUpdated))
+      ? new Date(item.lastUpdated).toISOString()
+      : new Date().toISOString()
+  };
+}
+
 async function persistSyncOperations(
   db: D1Database,
   tenantId: string,
@@ -461,13 +620,15 @@ async function persistSyncOperations(
   const now = new Date().toISOString();
   const accepted: string[] = [];
   const seen = new Set<string>();
+  const stagedInventoryIds = new Set<string>();
   const statements = [];
+  const prepared = [];
   for (const value of actions) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HttpError(400, 'Invalid sync operation.');
     const action = value as Record<string, unknown>;
     if (typeof action.id !== 'string' || action.id.length < 1 || action.id.length > 100 ||
         typeof action.actionType !== 'string' ||
-        !['STOCK_OUT', 'STOCK_IN', 'WASTE', 'STOCK_COUNT', 'UPDATE_ITEM', 'ADD_ITEM', 'IMPORT_ITEMS', 'BRANCH_TRANSFER'].includes(action.actionType) ||
+      !['STOCK_OUT', 'STOCK_IN', 'WASTE', 'STOCK_COUNT', 'UPDATE_ITEM', 'ADD_ITEM', 'IMPORT_ITEMS'].includes(action.actionType) ||
         !action.payload || typeof action.payload !== 'object' || Array.isArray(action.payload)) {
       throw new HttpError(400, 'Invalid sync operation.');
     }
@@ -482,19 +643,113 @@ async function persistSyncOperations(
       ? new Date(action.timestamp).toISOString()
       : now;
     const recordId = id();
+    const payload = action.payload as Record<string, unknown>;
+    let inventoryItems: InventoryItemRecord[] = [];
+    if (['UPDATE_ITEM', 'ADD_ITEM'].includes(action.actionType)) {
+      inventoryItems = [validateInventoryItem(payload.item)];
+    } else if (action.actionType === 'IMPORT_ITEMS') {
+      if (!Array.isArray(payload.items) || payload.items.length < 1 || payload.items.length > 500) {
+        throw new HttpError(400, 'Invalid inventory import operation.');
+      }
+      inventoryItems = payload.items.map(validateInventoryItem);
+    }
+    const movements = await resolveInventoryMovements(
+      db,
+      tenantId,
+      action.actionType,
+      payload
+    );
+
+    for (const inventoryItem of inventoryItems) {
+      const existing = await db.prepare(
+        'SELECT data_json AS dataJson FROM inventory_items WHERE tenant_id = ? AND id = ?'
+      ).bind(tenantId, inventoryItem.id).first<{ dataJson: string }>();
+      if (!existing) stagedInventoryIds.add(inventoryItem.id);
+      if (existing && action.actionType === 'UPDATE_ITEM') {
+        const current = JSON.parse(existing.dataJson) as InventoryItemRecord;
+        inventoryItem.currentStock = current.currentStock;
+        inventoryItem.totalIn = current.totalIn;
+        inventoryItem.totalOut = current.totalOut;
+        inventoryItem.totalWaste = current.totalWaste;
+      }
+    }
+    if (inventoryItems.length > 0) {
+      const ids = new Set<string>();
+      const names = new Set<string>();
+      for (const item of inventoryItems) {
+        if (ids.has(item.id) || names.has(item.name.toLocaleLowerCase())) {
+          throw new HttpError(400, 'Inventory import items must have unique IDs and names.');
+        }
+        ids.add(item.id);
+        names.add(item.name.toLocaleLowerCase());
+      }
+      const itemCount = await db.prepare(
+        `SELECT COUNT(*) AS count FROM inventory_items WHERE tenant_id = ?`
+      ).bind(tenantId).first<{ count: number }>();
+      const plan = await db.prepare(
+        `SELECT p.max_items AS maxItems FROM tenants t JOIN plans p ON p.id = t.plan_id
+         WHERE t.id = ?`
+      ).bind(tenantId).first<{ maxItems: number }>();
+      if (plan && Number(itemCount?.count || 0) + stagedInventoryIds.size > plan.maxItems) {
+        throw new HttpError(409, 'This inventory has reached the item limit for the current plan.');
+      }
+    }
+
+    prepared.push({ action, recordId, occurredAt, now, payloadJson, inventoryItems, movements });
+    accepted.push(operationId);
+  }
+  if (prepared.length === 0) {
+    return json({ success: true, durable: true, syncedCount: actions.length, processedAt: now });
+  }
+  for (const operation of prepared) {
+    const { action, recordId, occurredAt, payloadJson, inventoryItems, movements } = operation;
+    const operationId = action.id as string;
     statements.push(db.prepare(
       `INSERT OR IGNORE INTO sync_operations (tenant_id, operation_id, result_json, created_at)
        VALUES (?, ?, ?, ?)`
-    ).bind(tenantId, operationId, JSON.stringify({ operationId, accepted: true }), now));
+    ).bind(tenantId, operationId, JSON.stringify({ operationId, accepted: true }), operation.now));
+    for (const inventoryItem of inventoryItems) {
+      statements.push(db.prepare(
+        `INSERT INTO inventory_items (tenant_id, id, name, current_stock, data_json, updated_at)
+         SELECT ?, ?, ?, ?, ?, ? WHERE changes() = 1
+         ON CONFLICT (tenant_id, id) DO UPDATE SET
+           name = excluded.name, current_stock = excluded.current_stock,
+           data_json = excluded.data_json, updated_at = excluded.updated_at`
+      ).bind(
+        tenantId, inventoryItem.id, inventoryItem.name, inventoryItem.currentStock,
+        JSON.stringify(inventoryItem), operation.now
+      ));
+    }
+    for (const movement of movements) {
+      const isStockIn = movement.type === 'STOCK_IN';
+      const isWaste = movement.type === 'WASTE';
+      statements.push(db.prepare(
+        `UPDATE inventory_items
+         SET current_stock = ${isStockIn ? 'current_stock + ?' : isWaste ? 'MAX(0, current_stock - ?)' : 'MAX(0, current_stock - ?)'},
+             data_json = json_set(
+               data_json,
+               '$.currentStock', ${isStockIn ? 'current_stock + ?' : isWaste ? 'MAX(0, current_stock - ?)' : 'MAX(0, current_stock - ?)'},
+               '$.${isStockIn ? 'totalIn' : isWaste ? 'totalWaste' : 'totalOut'}',
+                 COALESCE(json_extract(data_json, '$.${isStockIn ? 'totalIn' : isWaste ? 'totalWaste' : 'totalOut'}'), 0) + ?,
+               '$.lastUpdated', ?
+             ),
+             updated_at = ?
+         WHERE tenant_id = ? AND id = ? AND changes() = 1`
+      ).bind(
+        movement.quantity, movement.quantity, movement.quantity, now, now, tenantId, movement.itemId
+      ));
+    }
     statements.push(db.prepare(
       `INSERT INTO inventory_events (id, tenant_id, actor_id, action_type, payload_json, occurred_at, created_at)
        SELECT ?, ?, ?, ?, ?, ?, ?
        WHERE changes() = 1`
     ).bind(
-      recordId, tenantId, user.id, action.actionType,
-      payloadJson, occurredAt, now
+      recordId, tenantId, user.id, action.actionType as string,
+      payloadJson, occurredAt, operation.now
     ));
-    accepted.push(operationId);
+  }
+  if (statements.length > 400) {
+    throw new HttpError(413, 'Too many inventory changes in one sync request.');
   }
   await db.batch(statements);
   const count = await db.prepare(
@@ -502,6 +757,65 @@ async function persistSyncOperations(
   ).bind(tenantId, ...accepted).first<{ count: number }>();
   if (count?.count !== accepted.length) throw new HttpError(500, 'Sync persistence could not be verified.');
   return json({ success: true, durable: true, syncedCount: actions.length, processedAt: now });
+}
+
+interface InventoryMovement {
+  itemId: string;
+  quantity: number;
+  type: 'STOCK_OUT' | 'STOCK_IN' | 'WASTE';
+}
+
+async function resolveInventoryMovements(
+  db: D1Database,
+  tenantId: string,
+  actionType: string,
+  payload: Record<string, unknown>
+): Promise<InventoryMovement[]> {
+  const inputs: Array<{ itemId?: unknown; itemName?: unknown; name?: unknown; qty?: unknown }> = [];
+  if (actionType === 'STOCK_OUT') {
+    if (!Array.isArray(payload.cartItems)) throw new HttpError(400, 'Invalid stock-out operation.');
+    for (const value of payload.cartItems) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new HttpError(400, 'Invalid stock-out item.');
+      }
+      const item = value as Record<string, unknown>;
+      inputs.push({ itemId: item.itemId, itemName: item.itemName, name: item.name, qty: item.qty });
+    }
+  } else if (actionType === 'STOCK_IN' || actionType === 'WASTE') {
+    inputs.push({
+      itemId: payload.itemId,
+      itemName: payload.itemName,
+      name: payload.itemName,
+      qty: payload.qty
+    });
+  } else {
+    return [];
+  }
+
+  const movements: InventoryMovement[] = [];
+  for (const input of inputs) {
+    if (typeof input.qty !== 'number' || !Number.isFinite(input.qty) || input.qty <= 0 || input.qty > 1_000_000_000) {
+      throw new HttpError(400, 'Inventory movement quantity must be greater than zero.');
+    }
+    let itemId = typeof input.itemId === 'string' && /^[a-zA-Z0-9_-]{1,100}$/.test(input.itemId)
+      ? input.itemId
+      : '';
+    if (itemId) {
+      const item = await db.prepare(
+        'SELECT id FROM inventory_items WHERE tenant_id = ? AND id = ?'
+      ).bind(tenantId, itemId).first<{ id: string }>();
+      if (!item) throw new HttpError(409, 'The inventory item no longer exists on the server.');
+    } else {
+      const itemName = boundedString(input.itemName ?? input.name, 'item name', 1, 160);
+      const item = await db.prepare(
+        'SELECT id FROM inventory_items WHERE tenant_id = ? AND name = ? COLLATE NOCASE'
+      ).bind(tenantId, itemName).first<{ id: string }>();
+      if (!item) throw new HttpError(409, `Inventory item "${itemName}" is not synchronized.`);
+      itemId = item.id;
+    }
+    movements.push({ itemId, quantity: input.qty, type: actionType as InventoryMovement['type'] });
+  }
+  return movements;
 }
 
 async function workforceRequest(request: Request, env: Env, url: URL): Promise<Response> {
