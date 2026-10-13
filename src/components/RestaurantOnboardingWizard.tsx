@@ -25,6 +25,7 @@ import {
 import { CafeTenant, SubscriptionPlan, Employee, StockItem } from '../types/stock';
 import { ApiService } from '../services/apiService';
 import { StorageService } from '../services/storageService';
+import { TurnstileChallenge } from './TurnstileChallenge';
 
 interface RestaurantOnboardingWizardProps {
   isOpen: boolean;
@@ -46,8 +47,9 @@ export const RestaurantOnboardingWizard: React.FC<RestaurantOnboardingWizardProp
   // Step 1: Profile & Identity
   const [businessName, setBusinessName] = useState('');
   const [businessType, setBusinessType] = useState('Specialty Coffee & Roastery');
-  const [ownerName, setOwnerName] = useState('Alex Rivers');
+  const [ownerName, setOwnerName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [adminPhone, setAdminPhone] = useState('');
   const [city, setCity] = useState('');
   const [currency, setCurrency] = useState('$');
@@ -65,9 +67,8 @@ export const RestaurantOnboardingWizard: React.FC<RestaurantOnboardingWizardProp
     'Walk-in Cold Storage',
     'Dry Packaging & Beans'
   ]);
-  const [ownerPin, setOwnerPin] = useState('2468');
-  const [managerPin, setManagerPin] = useState('1357');
-  const [staffPin, setStaffPin] = useState('0000');
+  const [ownerPin, setOwnerPin] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
   const [seedStarterStock, setSeedStarterStock] = useState(true);
 
   // Step 4: Submission
@@ -114,50 +115,31 @@ export const RestaurantOnboardingWizard: React.FC<RestaurantOnboardingWizardProp
     setErrorMsg('');
 
     try {
-      const branchesCount = selectedPlan.maxBranches > 1 ? (selectedPlan.id === 'plan-enterprise' ? 3 : 2) : 1;
-
       const res = await ApiService.registerTenant({
         name: businessName.trim(),
+        ownerName: ownerName.trim() || 'Store Owner',
         adminEmail: adminEmail.trim(),
+        password,
+        pin: ownerPin,
+        turnstileToken,
         adminPhone: adminPhone.trim(),
-        city: city.trim() || 'Central',
+        city: city.trim() || undefined,
         planId: selectedPlanId,
-        branchesCount,
-        currency
+        currency: currency === '$' ? 'USD' : currency === '€' ? 'EUR' : currency === '£' ? 'GBP' :
+          currency === 'AED' ? 'AED' : currency === 'SAR' ? 'SAR' :
+          currency === 'CAD $' ? 'CAD' : currency === 'AUD $' ? 'AUD' : 'USD'
       });
-
-      if (!res.success || !res.tenant) {
-        throw new Error(res.message || 'Could not provision new restaurant workspace.');
-      }
 
       const tenant = res.tenant;
 
-      // Create owner and initial staff employees for this tenant
-      const initialEmployees: Employee[] = [
-        {
-          id: `emp-${tenant.id}-owner`,
-          name: ownerName.trim() || 'Store Owner',
-          pin: ownerPin.trim() || '2468',
-          role: 'admin',
-          active: true
-        },
-        {
-          id: `emp-${tenant.id}-mgr`,
-          name: 'Lead Operations Manager',
-          pin: managerPin.trim() || '1357',
-          role: 'manager',
-          active: true
-        },
-        {
-          id: `emp-${tenant.id}-barista`,
-          name: 'Barista / Line Staff',
-          pin: staffPin.trim() || '0000',
-          role: 'staff',
-          active: true
-        }
-      ];
-
-      StorageService.saveEmployees(tenant.id, initialEmployees);
+      const ownerUser: Employee = {
+        id: res.user.id,
+        name: res.user.name,
+        pin: '',
+        role: 'admin',
+        active: true
+      };
+      StorageService.saveEmployees(tenant.id, [ownerUser]);
 
       // Seed starter catalog if requested
       if (seedStarterStock) {
@@ -336,7 +318,7 @@ export const RestaurantOnboardingWizard: React.FC<RestaurantOnboardingWizardProp
         StorageService.saveItems(tenant.id, starterItems);
       }
 
-      onComplete(tenant, initialEmployees[0]);
+      onComplete(tenant, ownerUser);
       onClose();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Error completing onboarding process.');
@@ -508,6 +490,22 @@ export const RestaurantOnboardingWizard: React.FC<RestaurantOnboardingWizardProp
                     value={adminEmail}
                     onChange={e => setAdminEmail(e.target.value)}
                     placeholder="owner@myrestaurant.com"
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Account Password *
+                  </label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    minLength={14}
+                    maxLength={256}
+                    autoComplete="new-password"
+                    placeholder="At least 14 characters"
                     required
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-amber-500"
                   />
@@ -784,46 +782,22 @@ export const RestaurantOnboardingWizard: React.FC<RestaurantOnboardingWizardProp
               <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-3">
                 <div className="text-xs font-bold text-white flex items-center gap-2">
                   <Key className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Terminal Access Quick PINs (4-Digits)</span>
+                  <span>Owner Terminal PIN (6–8 digits)</span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 gap-3">
                   <div>
                     <label className="block text-[11px] text-slate-400 mb-1">
                       Store Owner PIN (Admin)
                     </label>
                     <input
                       type="text"
-                      maxLength={4}
+                      inputMode="numeric"
+                      minLength={6}
+                      maxLength={8}
                       value={ownerPin}
                       onChange={e => setOwnerPin(e.target.value.replace(/\D/g, ''))}
                       className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-center text-sm font-mono font-bold text-amber-400 focus:outline-none focus:border-amber-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] text-slate-400 mb-1">
-                      Shift Manager PIN
-                    </label>
-                    <input
-                      type="text"
-                      maxLength={4}
-                      value={managerPin}
-                      onChange={e => setManagerPin(e.target.value.replace(/\D/g, ''))}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-center text-sm font-mono font-bold text-blue-400 focus:outline-none focus:border-amber-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] text-slate-400 mb-1">
-                      Barista / Staff PIN
-                    </label>
-                    <input
-                      type="text"
-                      maxLength={4}
-                      value={staffPin}
-                      onChange={e => setStaffPin(e.target.value.replace(/\D/g, ''))}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-center text-sm font-mono font-bold text-emerald-400 focus:outline-none focus:border-amber-500"
                     />
                   </div>
                 </div>
@@ -888,7 +862,7 @@ export const RestaurantOnboardingWizard: React.FC<RestaurantOnboardingWizardProp
                     Business Profile
                   </div>
                   <div className="font-bold text-white text-sm">{businessName}</div>
-                  <div className="text-slate-400 text-xs">{businessType} · {city || 'Downtown'}</div>
+                  <div className="text-slate-400 text-xs">{businessType} · {city || 'City not provided'}</div>
                   <div className="text-slate-400 text-xs">Owner: {ownerName} ({adminEmail})</div>
                 </div>
 
@@ -914,9 +888,13 @@ export const RestaurantOnboardingWizard: React.FC<RestaurantOnboardingWizardProp
                   <span>Immediate Access Credentials</span>
                 </div>
                 <div className="text-slate-300">
-                  Your store admin account is ready. Use PIN: <strong className="text-white font-mono text-sm px-1.5 py-0.5 rounded bg-slate-900 border border-amber-500/40">{ownerPin}</strong> to authenticate on any tablet or terminal.
+                  Your email and password create the owner account. The PIN is used only for terminal sign-in.
                 </div>
               </div>
+              <p className="text-[11px] leading-relaxed text-amber-200/80">
+                Branch names, zones, and starter inventory are not yet stored in the Cloudflare database. Starter items, if selected, remain on this device and will not appear on other terminals.
+              </p>
+              <TurnstileChallenge token={turnstileToken} onTokenChange={setTurnstileToken} />
 
               <div className="pt-2 flex items-center justify-between">
                 <button
@@ -931,10 +909,10 @@ export const RestaurantOnboardingWizard: React.FC<RestaurantOnboardingWizardProp
                 <button
                   type="button"
                   onClick={handleFinishOnboarding}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || password.length < 14 || !/^\d{6,8}$/.test(ownerPin) || !turnstileToken}
                   className="px-7 h-11 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-slate-950 font-black text-xs shadow-xl shadow-amber-950/50 flex items-center gap-2 transition-all active:scale-95"
                 >
-                  <span>{isSubmitting ? 'Provisioning...' : 'Complete & Launch Restaurant Terminal'}</span>
+                  <span>{isSubmitting ? 'Creating workspace...' : 'Create Owner Account & Workspace'}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>

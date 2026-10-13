@@ -15,7 +15,8 @@ import {
   FileSpreadsheet,
   Building2,
   Brain,
-  ArrowLeftRight
+  ArrowLeftRight,
+  Clock3
 } from 'lucide-react';
 import { UserRole } from '../types/stock';
 
@@ -34,6 +35,7 @@ export type TabId =
   | 'stock'
   | 'excel'
   | 'team'
+  | 'workforce'
   | 'license'
   | 'superadmin';
 
@@ -58,6 +60,7 @@ const ALL_NAV_ITEMS: NavItem[] = [
   { id: 'waste', label: 'Waste Log', icon: Trash2, minRole: 'teamlead' },
   { id: 'count', label: 'Count & Audit', icon: ClipboardCheck, minRole: 'staff' },
   { id: 'history', label: 'My History', icon: Clock, minRole: 'staff' },
+  { id: 'workforce', label: 'Working Hours', icon: Clock3, minRole: 'staff' },
   { id: 'suppliers', label: 'Suppliers', icon: Truck, minRole: 'manager' },
   { id: 'team', label: 'Team PINs', icon: Users, minRole: 'admin' },
   { id: 'license', label: 'License & Security', icon: ShieldAlert, minRole: 'admin' },

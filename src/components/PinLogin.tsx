@@ -8,7 +8,7 @@ interface PinLoginProps {
   tenants: CafeTenant[];
   onSelectCafe: (tenant: CafeTenant) => void;
   license: LicenseInfo;
-  onVerifyPin: (pin: string) => { success: boolean; user?: Employee; message?: string };
+  onVerifyPin: (pin: string) => Promise<{ success: boolean; user?: Employee; message?: string }>;
   onLoginSuccess: (user: Employee) => void;
   onLicenseRenewed: () => void;
   onOpenSuperAdmin?: () => void;
@@ -34,16 +34,13 @@ export const PinLogin: React.FC<PinLoginProps> = ({
   const [renewSuccess, setRenewSuccess] = useState(false);
   const [inputAccessCode, setInputAccessCode] = useState('');
   const [showCodeInput, setShowCodeInput] = useState(false);
+  const [isCheckingPin, setIsCheckingPin] = useState(false);
 
   const handleKeyPress = (digit: string) => {
     if (pin.length < 8) {
       setErrorMsg('');
       const nextPin = pin + digit;
       setPin(nextPin);
-      if (nextPin.length === 4) {
-        // Auto-check on 4 digits
-        checkPin(nextPin);
-      }
     }
   };
 
@@ -52,18 +49,26 @@ export const PinLogin: React.FC<PinLoginProps> = ({
     setErrorMsg('');
   };
 
-  const checkPin = (pinToCheck: string) => {
-    if (pinToCheck.length < 3) {
-      setErrorMsg('Enter your 4-digit PIN.');
+  const checkPin = async (pinToCheck: string) => {
+    if (pinToCheck.length < (import.meta.env.DEV ? 4 : 6)) {
+      setErrorMsg(import.meta.env.DEV ? 'Enter your 4-digit PIN.' : 'Enter your 6–8 digit PIN.');
       return;
     }
 
-    const res = onVerifyPin(pinToCheck);
-    if (res.success && res.user) {
-      onLoginSuccess(res.user);
-    } else {
-      setErrorMsg(res.message || 'Invalid PIN. Please try again.');
+    setIsCheckingPin(true);
+    try {
+      const res = await onVerifyPin(pinToCheck);
+      if (res.success && res.user) {
+        onLoginSuccess(res.user);
+      } else {
+        setErrorMsg(res.message || 'Invalid PIN. Please try again.');
+        setPin('');
+      }
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : 'Sign-in failed. Please try again.');
       setPin('');
+    } finally {
+      setIsCheckingPin(false);
     }
   };
 
@@ -71,7 +76,7 @@ export const PinLogin: React.FC<PinLoginProps> = ({
     const code = inputAccessCode.trim().toUpperCase();
     if (!code) return;
 
-    const matched = tenants.find(t => t.accessCode.toUpperCase() === code);
+    const matched = tenants.find(t => t.accessCode?.toUpperCase() === code);
     if (matched) {
       onSelectCafe(matched);
       setShowCodeInput(false);
@@ -188,7 +193,7 @@ export const PinLogin: React.FC<PinLoginProps> = ({
             {cafe.city && <span className="text-[10px] text-slate-500">· {cafe.city}</span>}
           </div>
         </div>
-        <div>
+        {import.meta.env.DEV && <div>
           <button
             onClick={() => setShowCodeInput(!showCodeInput)}
             className="text-[11px] text-amber-400 hover:text-amber-300 hover:underline flex items-center gap-1 font-mono transition-colors"
@@ -197,7 +202,7 @@ export const PinLogin: React.FC<PinLoginProps> = ({
             <KeyRound className="w-3 h-3" />
             <span>Switch Store Code</span>
           </button>
-        </div>
+        </div>}
       </div>
 
       {/* Center Keypad Card */}
@@ -211,8 +216,8 @@ export const PinLogin: React.FC<PinLoginProps> = ({
         </div>
 
         {/* PIN Dots Display */}
-        <div className="h-12 flex items-center justify-center gap-3 mb-6 bg-slate-900/60 rounded-2xl border border-slate-700/50">
-          {[0, 1, 2, 3].map(idx => (
+        <div className="h-12 flex items-center justify-center gap-2 mb-6 bg-slate-900/60 rounded-2xl border border-slate-700/50">
+          {Array.from({ length: import.meta.env.DEV ? 4 : 8 }, (_, idx) => idx).map(idx => (
             <div
               key={idx}
               className={`w-3.5 h-3.5 rounded-full transition-all duration-150 ${
@@ -257,15 +262,15 @@ export const PinLogin: React.FC<PinLoginProps> = ({
           </button>
           <button
             onClick={() => checkPin(pin)}
-            disabled={pin.length < 3}
+            disabled={pin.length < (import.meta.env.DEV ? 4 : 6) || isCheckingPin}
             className="h-14 rounded-2xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:hover:bg-amber-600 active:scale-[0.96] text-white text-lg font-bold transition-all flex items-center justify-center shadow-md shadow-amber-900/30 select-none"
           >
-            <ChevronRight className="w-6 h-6" />
+            {isCheckingPin ? <span className="text-xs">Checking…</span> : <ChevronRight className="w-6 h-6" />}
           </button>
         </div>
 
         {/* Access Code Switcher */}
-        <div className="mt-4 pt-4 border-t border-slate-700/60">
+        {import.meta.env.DEV && <div className="mt-4 pt-4 border-t border-slate-700/60">
           {!showCodeInput ? (
             <button
               onClick={() => setShowCodeInput(true)}
@@ -299,10 +304,10 @@ export const PinLogin: React.FC<PinLoginProps> = ({
               </button>
             </div>
           )}
-        </div>
+        </div>}
 
         {/* Quick Demo Credentials helper: Admin and Normal Employee Only */}
-        <div className="mt-4 pt-3 border-t border-slate-700/60">
+        {import.meta.env.DEV && <div className="mt-4 pt-3 border-t border-slate-700/60">
           <p className="text-[11px] font-medium text-slate-400 text-center mb-2">
             Quick Sign-In (Demo Testing):
           </p>
@@ -322,7 +327,7 @@ export const PinLogin: React.FC<PinLoginProps> = ({
               <span className="text-[10px] text-slate-400 font-mono">PIN: 0000</span>
             </button>
           </div>
-        </div>
+        </div>}
       </div>
 
       {/* Footer Info */}

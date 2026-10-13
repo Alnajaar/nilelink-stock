@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { createServer as createViteServer } from 'vite';
+import { DEFAULT_SUBSCRIPTION_PLANS } from './src/data/initialData';
 
 dotenv.config();
 
@@ -14,6 +15,12 @@ const PORT = process.env.PORT || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
 app.use(express.json());
+
+if (isProd) {
+  app.use('/api', (_req, res) => {
+    res.status(503).json({ error: 'The Express API is development-only. Use the Cloudflare Pages Functions backend.' });
+  });
+}
 
 // In-Memory Database for backend persistence (mirrors / stores tenants and plans)
 let tenantsDb = [
@@ -67,42 +74,12 @@ let tenantsDb = [
   }
 ];
 
-let plansDb = [
-  {
-    id: 'plan-starter',
-    name: 'Espresso Solo / Starter',
-    price: 29,
-    billingPeriod: 'monthly',
-    maxTerminals: 2,
-    maxItems: 150,
-    maxBranches: 1,
-    badge: 'Single Coffee Shop',
-    idealFor: 'Small cafes, specialty kiosks, and boutique coffee carts with limited stock items.'
-  },
-  {
-    id: 'plan-pro',
-    name: 'Bistro & Roastery Pro',
-    price: 69,
-    billingPeriod: 'monthly',
-    popular: true,
-    maxTerminals: 6,
-    maxItems: 750,
-    maxBranches: 2,
-    badge: 'Most Popular',
-    idealFor: 'Busy coffee shops, high-volume brunch bistros, and roasteries with expanding catalogs.'
-  },
-  {
-    id: 'plan-enterprise',
-    name: 'Multi-Branch & Chain Enterprise',
-    price: 149,
-    billingPeriod: 'monthly',
-    maxTerminals: 25,
-    maxItems: 5000,
-    maxBranches: 10,
-    badge: 'Multi-Location Chains',
-    idealFor: 'Owners managing 3, 4, 5+ coffee shops or restaurant chains from one unified command platform.'
-  }
-];
+let plansDb = DEFAULT_SUBSCRIPTION_PLANS.map(plan => ({ ...plan, features: [...plan.features] }));
+let contentDb = {
+  headline: 'Smarter stock management for hospitality teams',
+  description: 'Control inventory, reduce waste, and coordinate every location from one place.',
+  features: ['Stock tracking', 'Branch transfers', 'Waste insights', 'Offline workflows']
+};
 
 // --- REST API ENDPOINTS ---
 
@@ -112,7 +89,7 @@ app.get('/api/health', (req, res) => {
     status: 'online',
     platform: 'BarStock SaaS OS',
     edgeCompatible: true,
-    cloudflarePagesReady: true,
+    cloudflarePagesReady: false,
     timestamp: new Date().toISOString(),
     tenantsCount: tenantsDb.length
   });
@@ -188,6 +165,24 @@ app.put('/api/plans/:id', (req, res) => {
   res.json({ success: true, plan: plansDb[index] });
 });
 
+app.get('/api/content', (_req, res) => {
+  res.json({ success: true, content: contentDb });
+});
+
+app.put('/api/content', (req, res) => {
+  const { content } = req.body || {};
+  if (!content || typeof content.headline !== 'string' || typeof content.description !== 'string' ||
+      !Array.isArray(content.features) || !content.features.every((feature: unknown) => typeof feature === 'string')) {
+    return res.status(400).json({ error: 'Invalid public website content.' });
+  }
+  contentDb = {
+    headline: content.headline,
+    description: content.description,
+    features: content.features
+  };
+  res.json({ success: true, content: contentDb, published: true });
+});
+
 // 5. Super Admin SaaS Analytics
 app.get('/api/superadmin/analytics', (req, res) => {
   const activeCount = tenantsDb.filter(t => t.status === 'ACTIVE' || t.status === 'TRIAL').length;
@@ -241,8 +236,8 @@ async function startServer() {
     });
   }
 
-  app.listen(Number(PORT), '0.0.0.0', () => {
-    console.log(`🚀 BarStock SaaS Full-Stack Server running on port ${PORT} [${isProd ? 'PRODUCTION' : 'DEVELOPMENT'}]`);
+  app.listen(Number(PORT), '127.0.0.1', () => {
+    console.log(`BarStock local preview server running at http://127.0.0.1:${PORT}`);
   });
 }
 

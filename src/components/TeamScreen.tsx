@@ -4,13 +4,20 @@ import { Employee, UserRole } from '../types/stock';
 
 interface TeamScreenProps {
   employees: Employee[];
-  onAddEmployee: (name: string, pin: string, role: UserRole) => void;
-  onToggleActive: (id: string, active: boolean) => void;
-  onDeleteEmployee: (id: string) => void;
+  currency: string;
+  onAddEmployee: (name: string, pin: string, role: Exclude<UserRole, 'admin' | 'superadmin'>, compensation: {
+    payType: 'hourly' | 'salary';
+    payRateMinor: number;
+    payPeriod: 'weekly' | 'biweekly' | 'semimonthly' | 'monthly' | 'annual';
+    currency: string;
+  }) => Promise<void>;
+  onToggleActive: (id: string, active: boolean) => Promise<void>;
+  onDeleteEmployee: (id: string) => Promise<void>;
 }
 
 export const TeamScreen: React.FC<TeamScreenProps> = ({
   employees,
+  currency,
   onAddEmployee,
   onToggleActive,
   onDeleteEmployee
@@ -19,14 +26,44 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
   const [pin, setPin] = useState('');
   const [role, setRole] = useState<UserRole>('staff');
   const [isAdding, setIsAdding] = useState(false);
+  const [payType, setPayType] = useState<'hourly' | 'salary'>('hourly');
+  const [payRate, setPayRate] = useState('');
+  const [payPeriod, setPayPeriod] = useState<'weekly' | 'biweekly' | 'semimonthly' | 'monthly' | 'annual'>('monthly');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || pin.length < 3) return;
-    onAddEmployee(name.trim(), pin.trim(), role);
+    if (!name.trim() || !new RegExp(`^\\d{${import.meta.env.DEV ? '4,8' : '6,8'}}$`).test(pin)) {
+      setError(`Enter a valid ${import.meta.env.DEV ? '4–8' : '6–8'} digit PIN.`);
+      return;
+    }
+    const amount = Number(payRate);
+    if (!Number.isFinite(amount) || amount < 0) {
+      setError('Enter a valid non-negative compensation amount.');
+      return;
+    }
+    if (role === 'admin' || role === 'superadmin') return;
+    setSubmitting(true);
+    setError('');
+    try {
+      await onAddEmployee(name.trim(), pin.trim(), role, {
+        payType,
+        payRateMinor: Math.round(amount * 100),
+        payPeriod,
+        currency
+      });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not create this team member.');
+      return;
+    } finally {
+      setSubmitting(false);
+    }
     setName('');
     setPin('');
     setRole('staff');
+    setPayType('hourly');
+    setPayRate('');
     setIsAdding(false);
   };
 
@@ -38,9 +75,7 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
             <Users className="w-5 h-5 text-amber-600" />
             <span>Staff & PIN Access Roster</span>
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Manage barista and manager PINs, permissions, and active status
-          </p>
+          <p className="text-xs text-slate-500 mt-0.5">Manage team access, configured compensation, and active status.</p>
         </div>
 
         <button
@@ -77,15 +112,16 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
 
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">
-                4-Digit PIN Code *
+                {import.meta.env.DEV ? '4–8 digit PIN Code *' : '6–8 digit PIN Code *'}
               </label>
               <input
                 type="text"
                 pattern="[0-9]*"
                 maxLength={8}
+                minLength={import.meta.env.DEV ? 4 : 6}
                 value={pin}
                 onChange={e => setPin(e.target.value.replace(/[^0-9]/g, ''))}
-                placeholder="e.g. 2468"
+                placeholder={import.meta.env.DEV ? '4–8 digits' : '6–8 digits'}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:border-slate-800"
                 required
               />
@@ -103,16 +139,45 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
                 <option value="staff">Staff (Take, History, Count)</option>
                 <option value="teamlead">Team Lead (+ Stock In, Waste, Stock Levels)</option>
                 <option value="manager">Manager (+ Auto-Order, Suppliers, Reports)</option>
-                <option value="admin">Store Owner (Full Control &amp; Settings)</option>
               </select>
             </div>
           </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <label className="block text-xs font-semibold text-slate-700">
+              Compensation type
+              <select value={payType} onChange={event => setPayType(event.target.value as 'hourly' | 'salary')}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                <option value="hourly">Hourly</option>
+                <option value="salary">Salary</option>
+              </select>
+            </label>
+            <label className="block text-xs font-semibold text-slate-700">
+              {payType === 'hourly' ? `Hourly rate (${currency})` : `Gross salary amount (${currency})`}
+              <input type="number" min="0" step="0.01" required value={payRate} onChange={event => setPayRate(event.target.value)}
+                className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs" />
+            </label>
+            {payType === 'salary' && (
+              <label className="block text-xs font-semibold text-slate-700">
+                Salary period
+                <select value={payPeriod} onChange={event => setPayPeriod(event.target.value as typeof payPeriod)}
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+                  <option value="weekly">Weekly</option>
+                  <option value="biweekly">Biweekly</option>
+                  <option value="semimonthly">Semimonthly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="annual">Annual</option>
+                </select>
+              </label>
+            )}
+          </div>
 
+          {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
           <button
             type="submit"
-            className="w-full h-10 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded-xl transition-colors shadow-xs"
+            disabled={submitting}
+            className="w-full h-10 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded-xl transition-colors shadow-xs disabled:opacity-50"
           >
-            Create Staff Profile
+            {submitting ? 'Saving…' : 'Create Staff Profile'}
           </button>
         </form>
       )}
@@ -164,8 +229,11 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
                     </span>
                   </div>
                   <div className="text-xs text-slate-400 font-mono mt-0.5 flex items-center gap-2">
-                    <span>PIN: {emp.pin}</span>
-                    <span>·</span>
+                    {emp.payType && <span>
+                      {emp.payType === 'hourly' ? `${(emp.payRateMinor || 0) / 100} ${emp.currency || currency}/hr` :
+                        `${(emp.payRateMinor || 0) / 100} ${emp.currency || currency} ${emp.payPeriod || 'monthly'}`}
+                    </span>}
+                    {emp.payType && <span>·</span>}
                     <span className={emp.active ? 'text-emerald-600 font-semibold' : 'text-red-500'}>
                       {emp.active ? 'Active' : 'Deactivated'}
                     </span>
@@ -190,7 +258,7 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
                   <button
                     onClick={() => onDeleteEmployee(emp.id)}
                     className="w-8 h-8 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 flex items-center justify-center transition-colors"
-                    title="Remove member"
+                    title="Deactivate member and revoke access"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

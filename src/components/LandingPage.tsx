@@ -28,20 +28,25 @@ import {
 import { CafeTenant, SubscriptionPlan, Employee, UserRole } from '../types/stock';
 import { ApiService } from '../services/apiService';
 import { RestaurantOnboardingWizard } from './RestaurantOnboardingWizard';
+import { PublicSiteContent } from '../types/content';
 
 interface LandingPageProps {
   tenants: CafeTenant[];
   plans: SubscriptionPlan[];
+  publicContent: PublicSiteContent;
   onLaunchStore: (tenant: CafeTenant, user?: Employee) => void;
   onLaunchSuperAdmin: () => void;
+  onOwnerLogin: () => void;
   onNewTenantRegistered: (tenant: CafeTenant) => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
   tenants,
   plans,
+  publicContent,
   onLaunchStore,
   onLaunchSuperAdmin,
+  onOwnerLogin,
   onNewTenantRegistered
 }) => {
   const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'annual'>('monthly');
@@ -104,19 +109,24 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <a href="#multibranch" className="hover:text-amber-400 transition-colors">
               Multi-Branch Chains
             </a>
-            <a href="#demo" className="hover:text-amber-400 transition-colors">
-              Role Sandbox
-            </a>
+            <a href="#features" className="hover:text-amber-400 transition-colors">How it works</a>
           </nav>
 
           <div className="flex items-center gap-2.5">
             <button
+              onClick={onOwnerLogin}
+              className="px-3.5 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors flex items-center gap-1.5"
+            >
+              <Store className="w-3.5 h-3.5 text-amber-400" />
+              <span>Owner Sign In</span>
+            </button>
+            {import.meta.env.DEV && <button
               onClick={() => onLaunchStore(tenants[0])}
               className="px-3.5 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors flex items-center gap-1.5"
             >
               <Store className="w-3.5 h-3.5 text-amber-400" />
               <span>Store Terminal</span>
-            </button>
+            </button>}
 
             <button
               onClick={onLaunchSuperAdmin}
@@ -142,18 +152,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({
           </div>
 
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-[1.1]">
-            Stop Guessing Stock.{' '}
             <span className="bg-gradient-to-r from-amber-400 via-amber-200 to-amber-500 bg-clip-text text-transparent">
-              Run High-Velocity Cafes
-            </span>{' '}
-            From One Platform.
+              {publicContent.headline}
+            </span>
           </h1>
 
           <p className="mt-5 text-sm sm:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed">
-            Ultra-fast 1-second barista touch take, ML predictive auto-restocking, basement
-            offline-first sync, and smart loss &amp; theft audits — scaled from single kiosks to 20+
-            branch multi-unit empires.
+            {publicContent.description}
           </p>
+          {publicContent.features.length > 0 && (
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              {publicContent.features.map((feature, index) => (
+                <span key={`${feature}-${index}`} className="rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1 text-xs text-slate-300">
+                  {feature}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Action CTAs */}
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3.5">
@@ -169,11 +184,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </button>
 
             <a
-              href="#demo"
+              href="#features"
               className="w-full sm:w-auto px-6 h-12 rounded-2xl bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 font-semibold text-sm border border-slate-700 transition-colors flex items-center justify-center gap-2"
             >
               <Zap className="w-4 h-4 text-amber-400" />
-              <span>Interactive Role Demo</span>
+              <span>Explore features</span>
             </a>
           </div>
 
@@ -200,7 +215,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       </section>
 
       {/* 3. INTERACTIVE ROLE SANDBOX (TEST DRIVE NOW) */}
-      <section id="demo" className="py-16 sm:py-20 border-b border-slate-800/60 bg-slate-900/30">
+      {import.meta.env.DEV && <section id="demo" className="py-16 sm:py-20 border-b border-slate-800/60 bg-slate-900/30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <div className="text-center max-w-2xl mx-auto mb-12">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-800 text-amber-400 text-xs font-semibold mb-3">
@@ -325,7 +340,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </div>
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* 4. PLANS & TIERS SECTION (MATCHING USER EXACT SPECIFICATION) */}
       <section id="plans" className="py-20 sm:py-24 border-b border-slate-800/60 relative">

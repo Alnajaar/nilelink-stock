@@ -205,7 +205,8 @@ export class StorageService {
 
       // Filter pending items
       const itemsToSync = queue.filter(
-        i => (i.status === 'pending' || i.status === 'failed') && (!cafeId || i.cafeId === cafeId)
+        i => (i.status === 'pending' || i.status === 'failed' || i.status === 'syncing') &&
+          (!cafeId || i.cafeId === cafeId)
       );
 
       if (itemsToSync.length === 0) {
@@ -230,11 +231,12 @@ export class StorageService {
           })
         });
 
-        if (!response.ok) {
-          throw new Error(`Sync server responded with ${response.status}`);
+        if (!response.ok) throw new Error(`Sync server responded with ${response.status}`);
+        const result = await response.json() as { success?: boolean; syncedCount?: number };
+        if (result.success !== true || result.syncedCount !== itemsToSync.length) {
+          throw new Error('Sync server did not confirm every queued operation.');
         }
       } catch (networkErr) {
-        // If fetch fails or runs offline, simulate fallback or fail gracefully
         if (!this.isOnline()) {
           for (const action of itemsToSync) {
             action.status = 'pending';
@@ -243,6 +245,15 @@ export class StorageService {
           this.savePendingQueue(queue);
           return { syncedCount: 0, errors: itemsToSync.length };
         }
+        const message = networkErr instanceof Error ? networkErr.message : 'The sync request failed.';
+        for (const action of itemsToSync) {
+          action.status = 'failed';
+          action.error = message;
+          action.retryCount = (action.retryCount || 0) + 1;
+          IndexedDBService.updateSyncActionStatus(action.id, 'failed').catch(() => {});
+        }
+        this.savePendingQueue(queue);
+        return { syncedCount: 0, errors: itemsToSync.length };
       }
 
       // Reconcile and commit action successfully
@@ -291,8 +302,10 @@ export class StorageService {
 
   // --- TENANTS ---
   public static getTenants(): CafeTenant[] {
+    if (!import.meta.env.DEV) return [];
     const raw = localStorage.getItem(`${this.prefix}tenants`);
     if (!raw) {
+      if (!import.meta.env.DEV) return [];
       localStorage.setItem(`${this.prefix}tenants`, JSON.stringify(INITIAL_TENANTS));
       return INITIAL_TENANTS;
     }
@@ -303,12 +316,13 @@ export class StorageService {
         t => !t.name.includes("Ahmad's") && !t.name.includes("BB TRIPOLI") && !t.name.includes("The Corner Brew")
       );
       if (cleaned.length === 0) {
+        if (!import.meta.env.DEV) return [];
         localStorage.setItem(`${this.prefix}tenants`, JSON.stringify(INITIAL_TENANTS));
         return INITIAL_TENANTS;
       }
       return cleaned;
     } catch {
-      return INITIAL_TENANTS;
+      return import.meta.env.DEV ? INITIAL_TENANTS : [];
     }
   }
 
@@ -317,7 +331,7 @@ export class StorageService {
     if (stored && stored !== 'ahmad-001' && stored !== 'BB' && stored !== 'CCRAZE') {
       return stored;
     }
-    return 'nile-flagship';
+    return import.meta.env.DEV ? 'nile-flagship' : '';
   }
 
   public static setActiveTenantId(tenantId: string): void {
@@ -332,13 +346,14 @@ export class StorageService {
   public static getItems(cafeId: string): StockItem[] {
     const raw = localStorage.getItem(this.getKey(cafeId, 'items'));
     if (!raw) {
+      if (!import.meta.env.DEV) return [];
       this.saveItems(cafeId, CALIBRATED_ITEMS);
       return CALIBRATED_ITEMS;
     }
     try {
       return JSON.parse(raw);
     } catch {
-      return CALIBRATED_ITEMS;
+      return import.meta.env.DEV ? CALIBRATED_ITEMS : [];
     }
   }
 
@@ -420,6 +435,7 @@ export class StorageService {
   public static getStockOutLogs(cafeId: string): StockOutLog[] {
     const raw = localStorage.getItem(this.getKey(cafeId, 'logs_out'));
     if (!raw) {
+      if (!import.meta.env.DEV) return [];
       // Seed with rich 14-day logs so ML algorithm has rich consumption history immediately!
       const initialLogs = generateInitialStockOutLogs();
       this.saveStockOutLogs(cafeId, initialLogs);
@@ -430,6 +446,7 @@ export class StorageService {
       if (Array.isArray(parsed) && parsed.length > 0) {
         return parsed;
       }
+      if (!import.meta.env.DEV) return [];
       const initialLogs = generateInitialStockOutLogs();
       this.saveStockOutLogs(cafeId, initialLogs);
       return initialLogs;
@@ -711,6 +728,7 @@ export class StorageService {
   public static getWasteLogs(cafeId: string): WasteLog[] {
     const raw = localStorage.getItem(this.getKey(cafeId, 'logs_waste'));
     if (!raw) {
+      if (!import.meta.env.DEV) return [];
       // Seed rich waste logs for realistic analytics & insights
       const sampleWaste: WasteLog[] = [
         {
@@ -869,13 +887,14 @@ export class StorageService {
   public static getEmployees(cafeId: string): Employee[] {
     const raw = localStorage.getItem(this.getKey(cafeId, 'employees'));
     if (!raw) {
+      if (!import.meta.env.DEV) return [];
       this.saveEmployees(cafeId, INITIAL_EMPLOYEES);
       return INITIAL_EMPLOYEES;
     }
     try {
       return JSON.parse(raw);
     } catch {
-      return INITIAL_EMPLOYEES;
+      return import.meta.env.DEV ? INITIAL_EMPLOYEES : [];
     }
   }
 
@@ -884,6 +903,9 @@ export class StorageService {
   }
 
   public static verifyPin(cafeId: string, pin: string): { success: boolean; user?: Employee; message?: string } {
+    if (!import.meta.env.DEV) {
+      return { success: false, message: 'Local PIN authentication is disabled.' };
+    }
     const employees = this.getEmployees(cafeId);
     const match = employees.find(e => e.pin.trim() === pin.trim());
 
@@ -900,13 +922,14 @@ export class StorageService {
   public static getSuppliers(cafeId: string): Supplier[] {
     const raw = localStorage.getItem(this.getKey(cafeId, 'suppliers'));
     if (!raw) {
+      if (!import.meta.env.DEV) return [];
       this.saveSuppliers(cafeId, INITIAL_SUPPLIERS);
       return INITIAL_SUPPLIERS;
     }
     try {
       return JSON.parse(raw);
     } catch {
-      return INITIAL_SUPPLIERS;
+      return import.meta.env.DEV ? INITIAL_SUPPLIERS : [];
     }
   }
 

@@ -1,0 +1,335 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
+import { onRequest } from '../functions/api/[[route]].ts';
+import { D1Database, D1Statement } from '../functions/api/_lib/security.ts';
+
+class SqliteStatement implements D1Statement {
+  private parameters: unknown[] = [];
+
+  constructor(private readonly database: DatabaseSync, private readonly sql: string) {}
+
+  bind(...values: unknown[]): D1Statement {
+    this.parameters = values;
+    return this;
+  }
+
+  async first<T>(): Promise<T | null> {
+    return (this.database.prepare(this.sql).get(...this.sqlValues()) as T | undefined) || null;
+  }
+
+  async all<T>(): Promise<{ results: T[]; success: boolean }> {
+    return { results: this.database.prepare(this.sql).all(...this.sqlValues()) as T[], success: true };
+  }
+
+  async run(): Promise<unknown> {
+    const result = this.database.prepare(this.sql).run(...this.sqlValues());
+    return { success: true, meta: { changes: result.changes } };
+  }
+
+  execute(): unknown {
+    const result = this.database.prepare(this.sql).run(...this.sqlValues());
+    return { success: true, meta: { changes: result.changes } };
+  }
+
+  private sqlValues(): SQLInputValue[] {
+    return this.parameters.map(value => {
+      if (value === null || typeof value === 'string' || typeof value === 'number' ||
+          typeof value === 'bigint' || value instanceof Uint8Array) return value;
+      throw new TypeError('Unsupported SQLite test binding.');
+    });
+  }
+}
+
+class SqliteD1 implements D1Database {
+  constructor(private readonly database: DatabaseSync) {}
+
+  prepare(sql: string): D1Statement {
+    return new SqliteStatement(this.database, sql);
+  }
+
+  async batch(statements: D1Statement[]): Promise<unknown[]> {
+    this.database.exec('BEGIN');
+    try {
+      const results = statements.map(statement => (statement as SqliteStatement).execute());
+      this.database.exec('COMMIT');
+      return results;
+    } catch (error) {
+      this.database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+}
+
+async function currentTotp(secret: string): Promise<string> {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = '';
+  for (const character of secret) {
+    bits += alphabet.indexOf(character).toString(2).padStart(5, '0');
+  }
+  const secretBytes: number[] = [];
+  for (let index = 0; index + 8 <= bits.length; index += 8) {
+    secretBytes.push(parseInt(bits.slice(index, index + 8), 2));
+  }
+  const secretBuffer = new Uint8Array(secretBytes);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    secretBuffer,
+    { name: 'HMAC', hash: 'SHA-1' },
+    false,
+    ['sign']
+  );
+  const counter = new ArrayBuffer(8);
+  new DataView(counter).setBigUint64(0, BigInt(Math.floor(Date.now() / 30_000)));
+  const digest = new Uint8Array(await crypto.subtle.sign('HMAC', key, counter));
+  const offset = digest[digest.length - 1] & 0x0f;
+  const number = ((digest[offset] & 0x7f) << 24) |
+    (digest[offset + 1] << 16) | (digest[offset + 2] << 8) | digest[offset + 3];
+  return String(number % 1_000_000).padStart(6, '0');
+}
+
+test('Cloudflare API registration, PIN timekeeping, approval, and CSV export work on SQLite', async () => {
+  const sqlite = new DatabaseSync(':memory:');
+  sqlite.exec('PRAGMA foreign_keys = ON;');
+  const migration = await import('node:fs').then(fs => fs.readFileSync('migrations/0001_core.sql', 'utf8'));
+  sqlite.exec(migration);
+
+  const db = new SqliteD1(sqlite);
+  const env = {
+    DB: db,
+    BOOTSTRAP_ADMIN_EMAIL: 'platform@example.com',
+    BOOTSTRAP_ADMIN_TOKEN: 'test-bootstrap-token-that-is-long-enough-32',
+    BOOTSTRAP_ADMIN_TOTP_SECRET: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+    EMPLOYEE_PIN_PEPPER: 'test-pin-pepper-that-is-at-least-32-characters',
+    TURNSTILE_SECRET_KEY: 'test-turnstile-secret',
+    TURNSTILE_SITE_KEY: 'test-turnstile-site'
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    success: true,
+    hostname: 'app.example',
+    action: 'register'
+  }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+
+  const call = (path: string, method = 'GET', body?: unknown, cookie?: string) => {
+    const headers = new Headers();
+    if (method !== 'GET') {
+      headers.set('origin', 'https://app.example');
+      headers.set('content-type', 'application/json');
+    }
+    if (cookie) headers.set('cookie', cookie);
+    const request = new Request(`https://app.example${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    return onRequest({ request, env, params: {} });
+  };
+
+  try {
+    const registration = await call('/api/auth/register', 'POST', {
+      name: 'Test Cafe',
+      ownerName: '=SUM(1,1)',
+      email: 'owner@example.com',
+      password: 'a sufficiently long password',
+      pin: '123456',
+      turnstileToken: 'test-turnstile-token',
+      planId: 'plan-starter',
+      adminPhone: '+1 555 0100',
+      city: 'Test City',
+      currency: 'USD'
+    });
+    assert.equal(registration.status, 200, await registration.clone().text());
+    const registrationData = await registration.json() as {
+      user: { tenantId: string };
+      tenant: { id: string; adminPhone: string; city: string; paidUntil: string };
+    };
+    assert.equal(registrationData.tenant.adminPhone, '+1 555 0100');
+    assert.equal(registrationData.tenant.city, 'Test City');
+    const cookie = registration.headers.get('set-cookie')?.split(';')[0];
+    assert.ok(cookie);
+
+    const session = await call('/api/auth/me', 'GET', undefined, cookie);
+    assert.equal(session.status, 200);
+
+    const otherRegistration = await call('/api/auth/register', 'POST', {
+      name: 'Other Cafe',
+      ownerName: 'Other Owner',
+      email: 'other-owner@example.com',
+      password: 'another sufficiently long password',
+      pin: '654321',
+      turnstileToken: 'test-turnstile-token',
+      planId: 'plan-starter',
+      currency: 'USD'
+    });
+    assert.equal(otherRegistration.status, 200);
+    const otherTenant = await otherRegistration.json() as { tenant: { id: string } };
+    const crossTenantEntries = await call(
+      `/api/workforce/time-entries?tenantId=${otherTenant.tenant.id}&from=${new Date().toISOString().slice(0, 10)}&to=${new Date().toISOString().slice(0, 10)}`,
+      'GET',
+      undefined,
+      cookie
+    );
+    assert.equal(crossTenantEntries.status, 403);
+
+    const employeeCreate = await call('/api/workforce/employees', 'POST', {
+      tenantId: registrationData.tenant.id,
+      name: 'Manager User',
+      role: 'manager',
+      pin: '789012',
+      payType: 'salary',
+      payRateMinor: 420000,
+      payPeriod: 'monthly',
+      currency: 'USD'
+    }, cookie);
+    assert.equal(employeeCreate.status, 201);
+    const managerLogin = await call('/api/auth/pin', 'POST', {
+      tenantId: registrationData.tenant.id,
+      pin: '789012'
+    });
+    assert.equal(managerLogin.status, 200, await managerLogin.clone().text());
+    const managerCookie = managerLogin.headers.get('set-cookie')?.split(';')[0];
+    assert.ok(managerCookie);
+    const managerRoster = await call(
+      `/api/workforce/employees?tenantId=${registrationData.tenant.id}`,
+      'GET',
+      undefined,
+      managerCookie
+    );
+    const roster = await managerRoster.json() as { employees: Array<Record<string, unknown>> };
+    assert.equal(managerRoster.status, 200);
+    assert.equal(roster.employees.length, 2);
+    assert.equal('payRateMinor' in roster.employees.find(employee => employee.name === 'Manager User')!, false);
+
+    const pinLogin = await call('/api/auth/pin', 'POST', {
+      tenantId: registrationData.tenant.id,
+      pin: '123456'
+    });
+    assert.equal(pinLogin.status, 200);
+    const pinCookie = pinLogin.headers.get('set-cookie')?.split(';')[0];
+    assert.ok(pinCookie);
+
+    const clockIn = await call('/api/workforce/clock', 'POST', {
+      tenantId: registrationData.tenant.id,
+      action: 'clock_in'
+    }, pinCookie);
+    assert.equal(clockIn.status, 201);
+    const duplicateClockIn = await call('/api/workforce/clock', 'POST', {
+      tenantId: registrationData.tenant.id,
+      action: 'clock_in'
+    }, pinCookie);
+    assert.equal(duplicateClockIn.status, 409);
+
+    assert.equal((await call('/api/workforce/clock', 'POST', {
+      tenantId: registrationData.tenant.id,
+      action: 'start_break'
+    }, pinCookie)).status, 200);
+    assert.equal((await call('/api/workforce/clock', 'POST', {
+      tenantId: registrationData.tenant.id,
+      action: 'end_break'
+    }, pinCookie)).status, 200);
+    assert.equal((await call('/api/workforce/clock', 'POST', {
+      tenantId: registrationData.tenant.id,
+      action: 'clock_out'
+    }, pinCookie)).status, 200);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const entriesResponse = await call(
+      `/api/workforce/time-entries?tenantId=${registrationData.tenant.id}&from=${today}&to=${today}`,
+      'GET',
+      undefined,
+      cookie
+    );
+    const entries = await entriesResponse.json() as { entries: Array<{ id: string; status: string }> };
+    assert.equal(entriesResponse.status, 200);
+    assert.equal(entries.entries.length, 1);
+    assert.equal(entries.entries[0].status, 'submitted');
+
+    const approval = await call('/api/workforce/timesheets/approve', 'POST', {
+      tenantId: registrationData.tenant.id,
+      entryId: entries.entries[0].id,
+      decision: 'approved'
+    }, cookie);
+    assert.equal(approval.status, 200);
+    const duplicateApproval = await call('/api/workforce/timesheets/approve', 'POST', {
+      tenantId: registrationData.tenant.id,
+      entryId: entries.entries[0].id,
+      decision: 'approved'
+    }, cookie);
+    assert.equal(duplicateApproval.status, 404);
+
+    const exportResponse = await call(
+      `/api/workforce/payroll/export?tenantId=${registrationData.tenant.id}&from=${today}&to=${today}`,
+      'GET',
+      undefined,
+      cookie
+    );
+    const csv = await exportResponse.text();
+    assert.equal(exportResponse.status, 200);
+    assert.match(csv, /"'=SUM\(1,1\)"/);
+    assert.equal((await call('/api/tenants', 'GET', undefined, pinCookie)).status, 200);
+
+    const totp = await currentTotp(env.BOOTSTRAP_ADMIN_TOTP_SECRET);
+    const setup = await call('/api/auth/setup', 'POST', {
+      email: env.BOOTSTRAP_ADMIN_EMAIL,
+      password: 'platform admin password is sufficiently long',
+      token: env.BOOTSTRAP_ADMIN_TOKEN,
+      totp
+    });
+    assert.equal(setup.status, 200, await setup.clone().text());
+    const adminCookie = setup.headers.get('set-cookie')?.split(';')[0];
+    assert.ok(adminCookie);
+    const repeatSetup = await call('/api/auth/setup', 'POST', {
+      email: env.BOOTSTRAP_ADMIN_EMAIL,
+      password: 'platform admin password is sufficiently long',
+      token: env.BOOTSTRAP_ADMIN_TOKEN,
+      totp: await currentTotp(env.BOOTSTRAP_ADMIN_TOTP_SECRET)
+    });
+    assert.equal(repeatSetup.status, 409);
+
+    const adminTenants = await call('/api/tenants', 'GET', undefined, adminCookie);
+    const managed = await adminTenants.json() as { tenants: unknown[] };
+    assert.equal(managed.tenants.length, 2);
+    const planUpdate = await call('/api/plans/plan-starter', 'PUT', { price: 35 }, adminCookie);
+    assert.equal(planUpdate.status, 200);
+    const contentUpdate = await call('/api/content', 'PUT', {
+      publish: true,
+      content: {
+        headline: 'A new public headline',
+        description: 'A published description for test coverage.',
+        features: ['Live stock']
+      }
+    }, adminCookie);
+    assert.equal(contentUpdate.status, 200);
+    const publicContent = await call('/api/content');
+    const published = await publicContent.json() as { content: { headline: string } };
+    assert.equal(published.content.headline, 'A new public headline');
+
+    const ownerSubscriptionChange = await call(
+      `/api/tenants/${registrationData.tenant.id}`,
+      'PUT',
+      { status: 'SUSPENDED' },
+      cookie
+    );
+    assert.equal(ownerSubscriptionChange.status, 400);
+    const adminSuspension = await call(
+      `/api/tenants/${registrationData.tenant.id}`,
+      'PUT',
+      { status: 'SUSPENDED' },
+      adminCookie
+    );
+    assert.equal(adminSuspension.status, 200);
+    assert.equal((await call('/api/tenants', 'GET', undefined, cookie)).status, 401);
+
+    const adminReactivation = await call(
+      `/api/tenants/${registrationData.tenant.id}`,
+      'PUT',
+      { status: 'ACTIVE', paidUntil: registrationData.tenant.paidUntil },
+      adminCookie
+    );
+    assert.equal(adminReactivation.status, 200);
+  } finally {
+    globalThis.fetch = originalFetch;
+    sqlite.close();
+  }
+});

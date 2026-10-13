@@ -6,6 +6,10 @@ export interface Employee {
   pin: string;
   role: UserRole;
   active: boolean;
+  payType?: 'hourly' | 'salary';
+  payRateMinor?: number;
+  payPeriod?: 'weekly' | 'biweekly' | 'semimonthly' | 'monthly' | 'annual';
+  currency?: string;
   permissions?: string[]; // e.g. ['take', 'stockin', 'waste', 'count', 'autoorder', 'team']
   lastLogin?: string;
   branchName?: string;
@@ -137,11 +141,11 @@ export interface CafeTenant {
   city?: string;
   plan: string;
   planId: string;
-  accessCode: string; // e.g. 'DEMO-ACCESS-001'
+  accessCode?: string; // Development/demo access codes are not used by the production tenant API.
   specialLink?: string;
   paidUntil: string; // YYYY-MM-DD
   status: 'ACTIVE' | 'EXPIRED' | 'TRIAL' | 'SUSPENDED';
-  currency: string; // '$', '€', '£', 'AED', 'SAR', 'EGP', 'LBP'
+  currency: string; // ISO 4217 code in production; demo data may use a display symbol.
   created: string;
   organizationId?: string; // Grouping for multi-branch organizations
   isMultiBranch?: boolean; // When true, owner can switch between branches in their group

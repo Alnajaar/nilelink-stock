@@ -24,12 +24,15 @@ import {
 } from 'lucide-react';
 import { CafeTenant, SubscriptionPlan } from '../types/stock';
 import { DEFAULT_SUBSCRIPTION_PLANS } from '../data/initialData';
+import { PublicSiteContent } from '../types/content';
 
 interface SuperAdminPortalProps {
   tenants: CafeTenant[];
   plans: SubscriptionPlan[];
-  onSaveTenants: (tenants: CafeTenant[]) => void;
-  onSavePlans: (plans: SubscriptionPlan[]) => void;
+  onSaveTenants: (tenants: CafeTenant[]) => Promise<void>;
+  onSavePlans: (plans: SubscriptionPlan[]) => Promise<void>;
+  publicContent: PublicSiteContent;
+  onSavePublicContent: (content: PublicSiteContent, publish: boolean) => Promise<void>;
   onSelectCafe: (tenant: CafeTenant) => void;
   onShowToast: (msg: string, type?: 'ok' | 'err') => void;
   onGoToLanding?: () => void;
@@ -40,11 +43,13 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
   plans,
   onSaveTenants,
   onSavePlans,
+  publicContent,
+  onSavePublicContent,
   onSelectCafe,
   onShowToast,
   onGoToLanding
 }) => {
-  const [activeTab, setActiveTab] = useState<'clients' | 'plans' | 'deploy'>('clients');
+  const [activeTab, setActiveTab] = useState<'clients' | 'plans' | 'content' | 'deploy'>('clients');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
@@ -69,6 +74,10 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
   const [planTerminals, setPlanTerminals] = useState('2');
   const [planMaxItems, setPlanMaxItems] = useState('150');
   const [planDesc, setPlanDesc] = useState('');
+  const [contentHeadline, setContentHeadline] = useState(publicContent.headline);
+  const [contentDescription, setContentDescription] = useState(publicContent.description);
+  const [contentFeatures, setContentFeatures] = useState(publicContent.features.join('\n'));
+  const [isSavingContent, setIsSavingContent] = useState(false);
 
   // Calculate platform financial stats
   const activeTenants = tenants.filter(t => t.status === 'ACTIVE');
@@ -88,7 +97,7 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
     t =>
       t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.adminEmail.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.accessCode.toLowerCase().includes(searchQuery.toLowerCase())
+      t.id.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const handleCreateClient = (e: React.FormEvent) => {
@@ -121,21 +130,26 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
     };
 
     const updated = [newTenant, ...tenants];
-    onSaveTenants(updated);
-
-    onShowToast(`Client ${newTenant.name} created with Access Code: ${code}`, 'ok');
-    setIsAddingClient(false);
-    setNewClientName('');
-    setNewClientEmail('');
-    setNewClientPhone('');
-    setNewClientCity('');
+    void onSaveTenants(updated).then(() => {
+      onShowToast(`Client ${newTenant.name} created with Access Code: ${code}`, 'ok');
+      setIsAddingClient(false);
+      setNewClientName('');
+      setNewClientEmail('');
+      setNewClientPhone('');
+      setNewClientCity('');
+    }).catch(error => {
+      onShowToast(error instanceof Error ? error.message : 'Client creation is not available.', 'err');
+    });
   };
 
   const handleDeleteTenant = (tenantId: string, tenantName: string) => {
     if (window.confirm(`Are you sure you want to permanently delete customer "${tenantName}"? This action cannot be undone.`)) {
       const updated = tenants.filter(t => t.id !== tenantId);
-      onSaveTenants(updated);
-      onShowToast(`Client ${tenantName} deleted.`, 'ok');
+      void onSaveTenants(updated).then(() => {
+        onShowToast(`Client ${tenantName} suspended.`, 'ok');
+      }).catch(error => {
+        onShowToast(error instanceof Error ? error.message : 'Could not update this client.', 'err');
+      });
     }
   };
 
@@ -143,16 +157,20 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
     e.preventDefault();
     if (!editingTenant) return;
 
-    const selectedPlan = plans.find(p => p.id === editingTenant.planId || p.name === editingTenant.plan);
+    const selectedPlan = plans.find(p => p.id === editingTenant.planId);
     const updatedTenant: CafeTenant = {
       ...editingTenant,
-      plan: selectedPlan ? selectedPlan.name : editingTenant.plan
+      plan: selectedPlan ? selectedPlan.name : editingTenant.plan,
+      planId: selectedPlan ? selectedPlan.id : editingTenant.planId
     };
 
     const updated = tenants.map(t => (t.id === updatedTenant.id ? updatedTenant : t));
-    onSaveTenants(updated);
-    onShowToast(`Updated details for ${updatedTenant.name}!`, 'ok');
-    setEditingTenant(null);
+    void onSaveTenants(updated).then(() => {
+      onShowToast(`Updated details for ${updatedTenant.name}.`, 'ok');
+      setEditingTenant(null);
+    }).catch(error => {
+      onShowToast(error instanceof Error ? error.message : 'Could not update this client.', 'err');
+    });
   };
 
   const handleToggleStatus = (tenantId: string) => {
@@ -163,8 +181,8 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
       }
       return t;
     });
-    onSaveTenants(updated);
-    onShowToast('Client status updated.', 'ok');
+    void onSaveTenants(updated).then(() => onShowToast('Client status updated.', 'ok'))
+      .catch(error => onShowToast(error instanceof Error ? error.message : 'Could not update this client.', 'err'));
   };
 
   const handleExtendExpiry = (tenantId: string, extraDays: number) => {
@@ -176,8 +194,8 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
       }
       return t;
     });
-    onSaveTenants(updated);
-    onShowToast(`Extended subscription by ${extraDays} days!`, 'ok');
+    void onSaveTenants(updated).then(() => onShowToast(`Extended subscription by ${extraDays} days!`, 'ok'))
+      .catch(error => onShowToast(error instanceof Error ? error.message : 'Could not update this subscription.', 'err'));
   };
 
   const handleSetLifetime = (tenantId: string) => {
@@ -187,19 +205,37 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
       }
       return t;
     });
-    onSaveTenants(updated);
-    onShowToast(`Granted 10-year Lifetime access!`, 'ok');
+    void onSaveTenants(updated).then(() => onShowToast('Granted 10-year access.', 'ok'))
+      .catch(error => onShowToast(error instanceof Error ? error.message : 'Could not update this subscription.', 'err'));
   };
 
-  const handleCopySpecialLink = (code: string) => {
-    const link = `${window.location.origin}?code=${code}`;
-    navigator.clipboard.writeText(link);
-    setCopiedLink(code);
-    onShowToast('Special Access Link copied to clipboard!', 'ok');
-    setTimeout(() => setCopiedLink(null), 2500);
+  const handleCopySpecialLink = (tenantId: string) => {
+    const link = `${window.location.origin}?tenant=${encodeURIComponent(tenantId)}`;
+    navigator.clipboard.writeText(link).then(() => {
+      setCopiedLink(tenantId);
+      onShowToast('Terminal link copied.', 'ok');
+      setTimeout(() => setCopiedLink(null), 2500);
+    }).catch(() => onShowToast('Could not copy the terminal link. Copy it from the address bar instead.', 'err'));
   };
 
-  const handleCreatePlan = (e: React.FormEvent) => {
+  const handleSaveContent = async (publish: boolean) => {
+    const content = {
+      headline: contentHeadline.trim(),
+      description: contentDescription.trim(),
+      features: contentFeatures.split('\n').map(feature => feature.trim()).filter(Boolean)
+    };
+    setIsSavingContent(true);
+    try {
+      await onSavePublicContent(content, publish);
+      onShowToast(publish ? 'Public content published.' : 'Draft saved privately.', 'ok');
+    } catch (error) {
+      onShowToast(error instanceof Error ? error.message : 'Could not save public content.', 'err');
+    } finally {
+      setIsSavingContent(false);
+    }
+  };
+
+  const handleCreatePlan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!planName.trim()) return;
 
@@ -215,12 +251,15 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
       description: planDesc.trim() || 'Custom commercial subscription plan.'
     };
 
-    const updated = [...plans, newPlan];
-    onSavePlans(updated);
-    onShowToast(`Plan ${newPlan.name} created!`, 'ok');
-    setIsAddingPlan(false);
-    setPlanName('');
-    setPlanDesc('');
+    try {
+      await onSavePlans([...plans, newPlan]);
+      onShowToast(`Plan ${newPlan.name} created!`, 'ok');
+      setIsAddingPlan(false);
+      setPlanName('');
+      setPlanDesc('');
+    } catch (error) {
+      onShowToast(error instanceof Error ? error.message : 'Could not save the plan.', 'err');
+    }
   };
 
   return (
@@ -237,7 +276,7 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
               Super Admin SaaS Dashboard
             </h1>
             <p className="text-xs text-slate-400 mt-1 max-w-xl">
-              Manage cafe accounts, generate client access codes, configure subscription pricing, and monitor active recurring revenue.
+              Manage registered businesses, subscriptions, plan pricing, and published website content. New customer invitations are unavailable until secure email delivery is configured.
             </p>
           </div>
 
@@ -253,11 +292,12 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
             )}
 
             <button
-              onClick={() => setIsAddingClient(true)}
-              className="h-10 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 active:scale-95 text-white font-semibold text-xs flex items-center gap-1.5 shadow-md shadow-amber-950/40 transition-all"
+              disabled
+              title="Secure owner invitations are not configured. Customers can use public self-registration."
+              className="h-10 px-4 rounded-xl bg-slate-700 text-slate-300 font-semibold text-xs flex items-center gap-1.5 cursor-not-allowed"
             >
               <Plus className="w-4 h-4" />
-              <span>Onboard New Cafe Client</span>
+              <span>Client Invitations Not Configured</span>
             </button>
           </div>
         </div>
@@ -325,6 +365,16 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
           >
             Cloudflare Deployment Guide
           </button>
+          <button
+            onClick={() => setActiveTab('content')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${
+              activeTab === 'content'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            Public Content
+          </button>
         </div>
       </div>
 
@@ -338,7 +388,7 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
                 type="text"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search cafe name, email, or code..."
+                placeholder="Search business name, email, or workspace ID..."
                 className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-slate-800 shadow-xs"
               />
             </div>
@@ -352,7 +402,7 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
               const msLeft = new Date(tenant.paidUntil).getTime() - Date.now();
               const daysLeft = Math.ceil(msLeft / (1000 * 60 * 60 * 24));
               const isExpired = daysLeft <= 0;
-              const isCopied = copiedLink === tenant.accessCode;
+              const isCopied = copiedLink === tenant.id;
 
               return (
                 <div
@@ -392,13 +442,13 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
 
                       {/* Access Credentials Strip */}
                       <div className="flex flex-wrap items-center gap-2 mt-3 pt-2 border-t border-slate-100 text-xs">
-                        <span className="text-slate-400 font-medium">Access Code:</span>
+                        <span className="text-slate-400 font-medium">Terminal workspace ID:</span>
                         <span className="font-mono font-bold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200">
-                          {tenant.accessCode}
+                          {tenant.id}
                         </span>
 
                         <button
-                          onClick={() => handleCopySpecialLink(tenant.accessCode)}
+                          onClick={() => handleCopySpecialLink(tenant.id)}
                           className="h-7 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-semibold flex items-center gap-1 transition-colors ml-1"
                         >
                           {isCopied ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3 text-slate-500" />}
@@ -491,6 +541,40 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
         </div>
       )}
 
+      {activeTab === 'content' && (
+        <section className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-5">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Public landing page content</h3>
+            <p className="text-xs text-slate-500 mt-1">Drafts remain private until explicitly published. Text is rendered as plain text.</p>
+          </div>
+          <label className="block text-xs font-semibold text-slate-700">
+            Main headline
+            <input value={contentHeadline} maxLength={180} onChange={event => setContentHeadline(event.target.value)}
+              className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+          </label>
+          <label className="block text-xs font-semibold text-slate-700">
+            Description
+            <textarea value={contentDescription} maxLength={1000} rows={3} onChange={event => setContentDescription(event.target.value)}
+              className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+          </label>
+          <label className="block text-xs font-semibold text-slate-700">
+            Feature highlights (one per line)
+            <textarea value={contentFeatures} maxLength={2400} rows={6} onChange={event => setContentFeatures(event.target.value)}
+              className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+          </label>
+          <div className="flex flex-wrap justify-end gap-2">
+            <button disabled={isSavingContent} onClick={() => handleSaveContent(false)}
+              className="rounded-xl border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-700 disabled:opacity-50">
+              Save draft
+            </button>
+            <button disabled={isSavingContent} onClick={() => handleSaveContent(true)}
+              className="rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50">
+              Publish changes
+            </button>
+          </div>
+        </section>
+      )}
+
       {/* TAB 2: SUBSCRIPTION PLANS */}
       {activeTab === 'plans' && (
         <div className="space-y-4">
@@ -560,8 +644,11 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
                       onClick={() => {
                         if (window.confirm(`Delete plan "${p.name}"?`)) {
                           const updated = plans.filter(pl => pl.id !== p.id);
-                          onSavePlans(updated);
-                          onShowToast(`Plan ${p.name} deleted.`, 'ok');
+                          void onSavePlans(updated).then(() => {
+                            onShowToast(`Plan ${p.name} deleted.`, 'ok');
+                          }).catch(error => {
+                            onShowToast(error instanceof Error ? error.message : 'Could not delete the plan.', 'err');
+                          });
                         }
                       }}
                       className="text-[11px] text-red-500 hover:text-red-700 font-semibold"
@@ -585,47 +672,37 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-900">
-                How to Deploy NileLink Stock to Cloudflare Pages in 3 Minutes
+                Cloudflare Pre-deployment Checklist
               </h3>
               <p className="text-xs text-slate-500">
-                Zero server maintenance, global edge distribution, 100% free hosting tier
+                This checkout is not ready for production deployment.
               </p>
             </div>
           </div>
 
           <div className="space-y-4 text-xs text-slate-700 leading-relaxed">
-            <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-              <h4 className="font-bold text-slate-900 text-sm">Step 1: Build the Production Bundle</h4>
-              <p>In your terminal or repository, run the build command:</p>
-              <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl font-mono text-xs">
-                npm run build
-              </pre>
-              <p className="text-slate-500">
-                This compiles everything into a lightweight static bundle inside the <code>dist/</code> folder.
-              </p>
+            <div className="p-4 bg-red-50 rounded-2xl border border-red-200 space-y-2 text-red-900">
+              <h4 className="font-bold text-red-950 text-sm">Launch blockers</h4>
+              <ul className="list-disc pl-5 space-y-1">
+                <li><code>wrangler.toml</code> still contains a placeholder D1 database ID.</li>
+                <li>Inventory is stored in browser storage; the D1 sync endpoint records events but does not restore or reconcile stock.</li>
+                <li>Branch/zone onboarding, secure Super Admin invitations, email verification, and automated billing are not implemented.</li>
+                <li>Salary-period payroll, Cloudflare staging/integration tests, backups, and restore tests remain outstanding.</li>
+              </ul>
             </div>
-
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-              <h4 className="font-bold text-slate-900 text-sm">Step 2: Deploy to Cloudflare Pages</h4>
-              <p>Option A (Via Cloudflare Dashboard):</p>
+              <h4 className="font-bold text-slate-900 text-sm">Required before any production release</h4>
               <ol className="list-decimal pl-5 space-y-1 text-slate-600">
-                <li>Log in to <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" className="text-amber-600 font-semibold underline">Cloudflare Dashboard</a>.</li>
-                <li>Go to <strong>Workers &amp; Pages</strong> &gt; <strong>Create Application</strong> &gt; <strong>Pages</strong>.</li>
-                <li>Connect your Git repository (GitHub/GitLab) or drag-and-drop the <code>dist/</code> folder directly!</li>
-                <li>Set <strong>Build command</strong> to <code>npm run build</code> and <strong>Build output directory</strong> to <code>dist</code>.</li>
+                <li>Create the Cloudflare D1 database, update its ID in <code>wrangler.toml</code>, and apply the migrations.</li>
+                <li>Configure the D1 binding, Turnstile site/secret keys, employee PIN pepper, and one-time Super Admin bootstrap secrets in the Pages environment.</li>
+                <li>Complete the listed launch blockers, then run unit, type-check, build, D1 integration, and end-to-end tests against a staging deployment.</li>
+                <li>Verify access controls, backups/restore, monitoring, and rollback before enabling customer registration.</li>
               </ol>
-
-              <p className="pt-2">Option B (Via Wrangler CLI):</p>
-              <pre className="p-3 bg-slate-900 text-slate-200 rounded-xl font-mono text-xs">
-                npx wrangler pages deploy dist --project-name nilelink-stock
-              </pre>
-            </div>
-
-            <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-200 space-y-2 text-emerald-900">
-              <h4 className="font-bold text-emerald-950 text-sm">Step 3: Connect Custom Domain for Your Brand</h4>
+              <p className="pt-2">
+                Build locally with <code>npm run build</code>. A static-only upload of <code>dist/</code> omits the Pages Functions backend and D1 configuration; do not use it for a live deployment.
+              </p>
               <p>
-                In Cloudflare Pages, go to <strong>Custom Domains</strong> and attach your custom domain (e.g., <code>stock.nilelink.com</code>).
-                All cafes will access your white-labeled application with zero Google banners, ultra-low latency, and automated SSL!
+                When the application is launch-ready, connect it through the <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" className="text-amber-700 font-semibold underline">Cloudflare Dashboard</a> with Pages Functions and the configured D1 binding.
               </p>
             </div>
           </div>
@@ -656,7 +733,7 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Owner Email *</label>
+                  <label className="block font-semibold text-slate-700 mb-1">Business Contact Email *</label>
                   <input
                     type="email"
                     value={newClientEmail}
@@ -940,11 +1017,14 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Currency Symbol</label>
+                  <label className="block font-semibold text-slate-700 mb-1">Currency Code (ISO 4217)</label>
                   <input
                     type="text"
                     value={editingTenant.currency}
-                    onChange={e => setEditingTenant({ ...editingTenant, currency: e.target.value })}
+                    onChange={e => setEditingTenant({ ...editingTenant, currency: e.target.value.toUpperCase().slice(0, 3) })}
+                    maxLength={3}
+                    pattern="[A-Z]{3}"
+                    placeholder="USD"
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-slate-800 font-mono"
                     required
                   />

@@ -40,15 +40,25 @@ import { LandingPage } from './components/LandingPage';
 import { NotificationSettingsModal } from './components/NotificationSettingsModal';
 import { NotificationService } from './services/notificationService';
 import { SyncStatusInfo } from './services/storageService';
+import { ApiService } from './services/apiService';
+import { SuperAdminLogin } from './components/SuperAdminLogin';
+import { PublicSiteContent } from './types/content';
+import { OwnerLogin } from './components/OwnerLogin';
+import { WorkforceScreen } from './components/WorkforceScreen';
 
 export default function App() {
   // Navigation Mode: 'landing' (public SaaS visitor) | 'store' (active POS/terminal) | 'superadmin' (platform owner)
-  const [appMode, setAppMode] = useState<'landing' | 'store' | 'superadmin'>('landing');
+  const [appMode, setAppMode] = useState<'landing' | 'store' | 'superadmin' | 'ownerLogin'>('landing');
 
   // Tenants & SaaS Plans
   const [tenants, setTenants] = useState<CafeTenant[]>([]);
   const [activeCafe, setActiveCafe] = useState<CafeTenant | null>(null);
   const [plans, setPlans] = useState<SubscriptionPlan[]>(DEFAULT_SUBSCRIPTION_PLANS);
+  const [publicContent, setPublicContent] = useState<PublicSiteContent>({
+    headline: 'Smarter stock management for hospitality teams',
+    description: 'Control inventory, reduce waste, and coordinate every location from one place.',
+    features: ['Stock tracking', 'Branch transfers', 'Waste insights', 'Offline workflows']
+  });
   const [license, setLicense] = useState(LicenseManager.getLicenseStatus('nile-flagship', 'Demo Specialty Roastery'));
 
   // Authenticated User
@@ -105,31 +115,30 @@ export default function App() {
     const loadedTenants = StorageService.getTenants();
     setTenants(loadedTenants);
 
-    const storedPlans = localStorage.getItem('nilelink_plans');
-    if (storedPlans) {
-      try {
-        setPlans(JSON.parse(storedPlans));
-      } catch {
-        // use default
-      }
-    }
+    ApiService.getPlans().then(setPlans).catch(error => {
+      if (!import.meta.env.DEV) console.error('Could not load published plans:', error);
+    });
+    ApiService.getPublicContent().then(setPublicContent).catch(error => {
+      if (!import.meta.env.DEV) console.error('Could not load published site content:', error);
+    });
 
     // Check URL parameters for special access code: ?code=NL-... or ?mode=store/superadmin
     const urlParams = new URLSearchParams(window.location.search);
     const codeParam = urlParams.get('code');
+    const tenantParam = urlParams.get('tenant');
     const modeParam = urlParams.get('mode');
 
-    let initialTenant = loadedTenants[0];
-    if (codeParam) {
+    let initialTenant = loadedTenants[0] || null;
+    if (import.meta.env.DEV && codeParam) {
       const matched = loadedTenants.find(
-        t => t.accessCode.toUpperCase() === codeParam.trim().toUpperCase()
+        t => t.accessCode?.toUpperCase() === codeParam.trim().toUpperCase()
       );
       if (matched) {
         initialTenant = matched;
         StorageService.setActiveTenantId(matched.id);
         setAppMode('store');
       }
-    } else if (modeParam === 'store') {
+    } else if (import.meta.env.DEV && modeParam === 'store') {
       const activeId = StorageService.getActiveTenantId();
       const found = loadedTenants.find(t => t.id === activeId);
       if (found) initialTenant = found;
@@ -143,14 +152,70 @@ export default function App() {
       // Landing page is the default for first-time visitors!
     }
 
+    if (!import.meta.env.DEV && tenantParam) {
+      ApiService.lookupTenant(tenantParam).then(tenant => {
+        setActiveCafe(tenant);
+        setLicense(LicenseManager.getLicenseStatus(tenant.id, tenant.name));
+        loadTenantData(tenant.id);
+        setAppMode('store');
+      }).catch(error => {
+        console.error('Could not open the requested terminal workspace:', error);
+      });
+    }
+
     setActiveCafe(initialTenant);
-    const lic = LicenseManager.getLicenseStatus(initialTenant.id, initialTenant.name);
-    setLicense(lic);
-    loadTenantData(initialTenant.id);
+    if (initialTenant) {
+      const lic = LicenseManager.getLicenseStatus(initialTenant.id, initialTenant.name);
+      setLicense(lic);
+      loadTenantData(initialTenant.id);
+    }
 
     // Initialize Web Push Notification service & PWA Auto-Sync
     NotificationService.init();
     StorageService.initAutoSync();
+
+    ApiService.getSession().then(user => {
+      if (user?.role === 'platform_admin') {
+        setCurrentUser({
+          id: user.id,
+          name: user.name,
+          pin: '',
+          role: 'superadmin',
+          active: true
+        });
+        setAppMode('superadmin');
+        ApiService.getTenants().then(setTenants).catch(error => {
+          console.error('Could not load managed tenants:', error);
+        });
+      } else if (user?.tenantId && ['owner', 'admin', 'manager', 'teamlead', 'staff'].includes(user.role)) {
+        ApiService.getTenants().then(accountTenants => {
+          const tenant = accountTenants.find(entry => entry.id === user.tenantId);
+          if (!tenant) throw new Error('The signed-in account has no accessible business.');
+          setTenants(accountTenants);
+          setActiveCafe(tenant);
+          setLicense(LicenseManager.getLicenseStatus(tenant.id, tenant.name));
+          loadTenantData(tenant.id);
+          setCurrentUser({
+            id: user.id,
+            name: user.name,
+            pin: '',
+            role: user.role === 'owner' ? 'admin' : user.role as Employee['role'],
+            active: true
+          });
+          setCurrentTab(user.role === 'staff' || user.role === 'teamlead' ? 'take' : 'overview');
+          if (user.role === 'owner' || user.role === 'admin' || user.role === 'manager') {
+            ApiService.getEmployees(tenant.id).then(setEmployees).catch(error => {
+              console.error('Could not load team members:', error);
+            });
+          }
+          setAppMode('store');
+        }).catch(error => {
+          console.error('Could not restore owner session:', error);
+        });
+      }
+    }).catch(error => {
+      if (!import.meta.env.DEV) console.error('Could not restore authenticated session:', error);
+    });
   }, [loadTenantData]);
 
   // Background Web Push check when items update
@@ -177,13 +242,37 @@ export default function App() {
   }, [activeCafe]);
 
   // Auth
-  const handleVerifyPin = (pin: string) => {
+  const handleVerifyPin = async (pin: string) => {
     if (!activeCafe) return { success: false, message: 'No cafe selected' };
-    return StorageService.verifyPin(activeCafe.id, pin);
+    if (import.meta.env.DEV) return StorageService.verifyPin(activeCafe.id, pin);
+    try {
+      const user = await ApiService.signInWithPin(activeCafe.id, pin);
+      if (!['owner', 'admin', 'manager', 'teamlead', 'staff'].includes(user.role)) {
+        await ApiService.signOut();
+        return { success: false, message: 'This account cannot access terminal sign-in.' };
+      }
+      return {
+        success: true,
+        user: {
+          id: user.id,
+          name: user.name,
+          pin: '',
+          role: user.role === 'owner' ? 'admin' : user.role as Employee['role'],
+          active: true
+        }
+      };
+    } catch (error) {
+      return { success: false, message: error instanceof Error ? error.message : 'Sign-in failed.' };
+    }
   };
 
   const handleLoginSuccess = (user: Employee) => {
     setCurrentUser(user);
+    if (!import.meta.env.DEV && activeCafe && ['admin', 'manager'].includes(user.role)) {
+      ApiService.getEmployees(activeCafe.id).then(setEmployees).catch(error => {
+        showToast(error instanceof Error ? error.message : 'Could not load team members.', 'err');
+      });
+    }
     if (user.role === 'admin') {
       setCurrentTab('overview');
     } else {
@@ -193,6 +282,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    ApiService.signOut().catch(error => showToast(error.message, 'err'));
     setCurrentUser(null);
     setCurrentTab('take');
     setAppMode('landing');
@@ -201,18 +291,52 @@ export default function App() {
 
   // Launch Super Admin directly
   const handleOpenSuperAdmin = () => {
-    // Elevate to dedicated Platform Super Admin account with role: 'superadmin'
-    const superAdminUser: Employee = {
-      id: 'super-admin-01',
-      name: 'Platform Super Admin',
-      pin: '1111',
-      role: 'superadmin',
-      active: true
-    };
-    setCurrentUser(superAdminUser);
+    setCurrentUser(null);
     setAppMode('superadmin');
     setCurrentTab('superadmin');
-    showToast('Launched Super Admin SaaS Console.', 'ok');
+  };
+
+  const handleSuperAdminLogin = async (email: string, password: string, totp: string) => {
+    const user = await ApiService.signIn(email, password, totp);
+    if (user.role !== 'platform_admin') {
+      await ApiService.signOut();
+      throw new Error('This account is not authorized for platform administration.');
+    }
+    const managedTenants = await ApiService.getTenants();
+    setTenants(managedTenants);
+    setCurrentUser({
+      id: user.id,
+      name: user.name,
+      pin: '',
+      role: 'superadmin',
+      active: true
+    });
+    setAppMode('superadmin');
+    setCurrentTab('superadmin');
+  };
+
+  const handleOwnerLogin = async (email: string, password: string) => {
+    const user = await ApiService.signIn(email, password);
+    if (!user.tenantId || !['owner', 'admin'].includes(user.role)) {
+      await ApiService.signOut();
+      throw new Error('This account cannot access a business workspace.');
+    }
+    const accountTenants = await ApiService.getTenants();
+    const tenant = accountTenants.find(entry => entry.id === user.tenantId);
+    if (!tenant) {
+      await ApiService.signOut();
+      throw new Error('No business workspace is available for this account.');
+    }
+    setTenants(accountTenants);
+    setActiveCafe(tenant);
+    setLicense(LicenseManager.getLicenseStatus(tenant.id, tenant.name));
+    loadTenantData(tenant.id);
+    ApiService.getEmployees(tenant.id).then(setEmployees).catch(error => {
+      showToast(error instanceof Error ? error.message : 'Could not load team members.', 'err');
+    });
+    setCurrentUser({ id: user.id, name: user.name, pin: '', role: 'admin', active: true });
+    setCurrentTab('overview');
+    setAppMode('store');
   };
 
   // Strict multi-tenant security: store admin can NEVER see superadmin
@@ -322,14 +446,42 @@ export default function App() {
   };
 
   // Team Actions
-  const handleAddEmployee = (name: string, pin: string, role: any) => {
+  const handleAddEmployee = async (
+    name: string,
+    pin: string,
+    role: Exclude<Employee['role'], 'admin' | 'superadmin'>,
+    compensation: {
+      payType: 'hourly' | 'salary';
+      payRateMinor: number;
+      payPeriod: 'weekly' | 'biweekly' | 'semimonthly' | 'monthly' | 'annual';
+      currency: string;
+    }
+  ) => {
     if (!activeCafe) return;
+    if (!import.meta.env.DEV) {
+      try {
+        const created = await ApiService.createEmployee({
+          tenantId: activeCafe.id,
+          name,
+          pin,
+          role,
+          ...compensation
+        });
+        setEmployees(current => [...current, created]);
+        showToast(`Added ${name} as ${role}.`, 'ok');
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Could not add this team member.', 'err');
+        throw error;
+      }
+      return;
+    }
     const newEmp: Employee = {
       id: 'emp-' + Date.now(),
       name,
       pin,
       role,
-      active: true
+      active: true,
+      ...compensation
     };
     const updated = [...employees, newEmp];
     StorageService.saveEmployees(activeCafe.id, updated);
@@ -337,16 +489,32 @@ export default function App() {
     showToast(`Added ${name} as ${role}!`, 'ok');
   };
 
-  const handleToggleActive = (id: string, active: boolean) => {
+  const handleToggleActive = async (id: string, active: boolean) => {
     if (!activeCafe) return;
+    if (!import.meta.env.DEV) {
+      try {
+        await ApiService.updateEmployee(activeCafe.id, id, { active });
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Could not update this team member.', 'err');
+        return;
+      }
+    }
     const updated = employees.map(e => (e.id === id ? { ...e, active } : e));
     StorageService.saveEmployees(activeCafe.id, updated);
     setEmployees(updated);
     showToast('Employee status updated.', 'ok');
   };
 
-  const handleDeleteEmployee = (id: string) => {
+  const handleDeleteEmployee = async (id: string) => {
     if (!activeCafe) return;
+    if (!import.meta.env.DEV) {
+      try {
+        await ApiService.updateEmployee(activeCafe.id, id, { active: false });
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Could not deactivate this team member.', 'err');
+        return;
+      }
+    }
     const updated = employees.filter(e => e.id !== id);
     StorageService.saveEmployees(activeCafe.id, updated);
     setEmployees(updated);
@@ -362,24 +530,57 @@ export default function App() {
   };
 
   // Super Admin SaaS Actions
-  const handleSaveTenants = (updatedTenants: CafeTenant[]) => {
-    setTenants(updatedTenants);
-    localStorage.setItem('barstock_v2_tenants', JSON.stringify(updatedTenants));
-    // If active cafe was edited, sync
+  const handleSaveTenants = async (updatedTenants: CafeTenant[]) => {
+    const previousById = new Map(tenants.map(tenant => [tenant.id, tenant]));
+    const updatedById = new Map(updatedTenants.map(tenant => [tenant.id, tenant]));
+    for (const tenant of updatedTenants) {
+      const previous = previousById.get(tenant.id);
+      if (!previous) {
+        throw new Error('Creating client accounts requires the secure owner-invitation flow, which is not configured yet.');
+      }
+      const changes: Partial<CafeTenant> = {};
+      for (const field of ['name', 'adminEmail', 'adminPhone', 'city', 'planId', 'paidUntil', 'status', 'currency'] as const) {
+        if (previous[field] !== tenant[field]) Object.assign(changes, { [field]: tenant[field] });
+      }
+      if (Object.keys(changes).length) {
+        await ApiService.updateTenant(tenant.id, changes);
+      }
+    }
+    for (const previous of tenants) {
+      if (!updatedById.has(previous.id)) {
+        await ApiService.updateTenant(previous.id, { status: 'SUSPENDED' });
+      }
+    }
+    const savedTenants = await ApiService.getTenants();
+    setTenants(savedTenants);
     if (activeCafe) {
-      const found = updatedTenants.find(t => t.id === activeCafe.id);
+      const found = savedTenants.find(tenant => tenant.id === activeCafe.id);
       if (found) setActiveCafe(found);
     }
   };
 
-  const handleSavePlans = (updatedPlans: SubscriptionPlan[]) => {
-    setPlans(updatedPlans);
-    localStorage.setItem('nilelink_plans', JSON.stringify(updatedPlans));
+  const handleSavePlans = async (updatedPlans: SubscriptionPlan[]) => {
+    const previousById = new Map(plans.map(plan => [plan.id, plan]));
+    const updatedById = new Map(updatedPlans.map(plan => [plan.id, plan]));
+    for (const plan of updatedPlans) {
+      const previous = previousById.get(plan.id);
+      if (!previous) {
+        await ApiService.createPlan(plan);
+      } else if (JSON.stringify(previous) !== JSON.stringify(plan)) {
+        await ApiService.updatePlan(plan);
+      }
+    }
+    for (const previous of plans) {
+      if (!updatedById.has(previous.id)) {
+        await ApiService.updatePlan(previous, false);
+      }
+    }
+    setPlans(await ApiService.getPlans());
   };
 
   // Live Calculated Metrics
   const metrics = useMemo(() => {
-    if (!activeCafe) {
+    if (!activeCafe && appMode === 'store') {
       return {
         totalUnits: 0,
         totalItems: 0,
@@ -391,18 +592,19 @@ export default function App() {
         totalValue: 0
       };
     }
-    return StorageService.getMetrics(activeCafe.id);
+    return activeCafe ? StorageService.getMetrics(activeCafe.id) : {
+      totalUnits: 0,
+      totalItems: 0,
+      needToOrder: 0,
+      healthyCount: 0,
+      totalReceived: 0,
+      totalTaken: 0,
+      totalWaste: 0,
+      totalValue: 0
+    };
   }, [activeCafe, items]);
 
   const reorderCount = metrics.needToOrder;
-
-  if (!activeCafe) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white text-sm font-semibold">
-        Loading NileLink Stock Platform...
-      </div>
-    );
-  }
 
   // 1. PUBLIC VISITOR SAAS LANDING PAGE (First visit / home)
   if (appMode === 'landing') {
@@ -411,6 +613,7 @@ export default function App() {
         <LandingPage
           tenants={tenants}
           plans={plans}
+          publicContent={publicContent}
           onLaunchStore={(tenant, user) => {
             setActiveCafe(tenant);
             loadTenantData(tenant.id);
@@ -425,6 +628,7 @@ export default function App() {
           onLaunchSuperAdmin={() => {
             handleOpenSuperAdmin();
           }}
+          onOwnerLogin={() => setAppMode('ownerLogin')}
           onNewTenantRegistered={newTenant => {
             const updated = [newTenant, ...tenants];
             setTenants(updated);
@@ -439,13 +643,25 @@ export default function App() {
     );
   }
 
-  // 2. DEDICATED SUPER ADMIN SAAS COMMAND CENTER
+  if (appMode === 'ownerLogin') {
+    return <OwnerLogin onSubmit={handleOwnerLogin} onBack={() => setAppMode('landing')} />;
+  }
+
+  // 2. Super Admin authentication precedes the private console.
   if (appMode === 'superadmin') {
+    if (currentUser?.role !== 'superadmin') {
+      return <SuperAdminLogin onSubmit={handleSuperAdminLogin} onBack={() => setAppMode('landing')} />;
+    }
     return (
       <div className="min-h-screen bg-slate-950 p-4 sm:p-6 text-slate-100 flex flex-col">
         <SuperAdminPortal
           tenants={tenants}
           plans={plans}
+          publicContent={publicContent}
+          onSavePublicContent={async (content, publish) => {
+            await ApiService.savePublicContent(content, publish);
+            if (publish) setPublicContent(content);
+          }}
           onSaveTenants={handleSaveTenants}
           onSavePlans={handleSavePlans}
           onSelectCafe={tenant => {
@@ -456,6 +672,14 @@ export default function App() {
           onGoToLanding={() => setAppMode('landing')}
         />
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      </div>
+    );
+  }
+
+  if (!activeCafe) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white text-sm font-semibold">
+        Loading NileLink Stock Platform...
       </div>
     );
   }
@@ -661,16 +885,26 @@ export default function App() {
         {currentTab === 'team' && (
           <TeamScreen
             employees={employees}
+            currency={activeCafe.currency || 'USD'}
             onAddEmployee={handleAddEmployee}
             onToggleActive={handleToggleActive}
             onDeleteEmployee={handleDeleteEmployee}
           />
         )}
 
+        {currentTab === 'workforce' && (
+          <WorkforceScreen tenantId={activeCafe.id} user={currentUser} onShowToast={showToast} />
+        )}
+
         {currentTab === 'superadmin' && (
           <SuperAdminPortal
             tenants={tenants}
             plans={plans}
+            publicContent={publicContent}
+            onSavePublicContent={async (content, publish) => {
+              await ApiService.savePublicContent(content, publish);
+              if (publish) setPublicContent(content);
+            }}
             onSaveTenants={handleSaveTenants}
             onSavePlans={handleSavePlans}
             onSelectCafe={handleSelectCafe}
