@@ -1,0 +1,62 @@
+{
+  "id": "/",
+  "name": "BarStock Pro - Cafe & Restaurant Stock System",
+  "short_name": "BarStock Pro",
+  "description": "High-performance inventory & stock management system for cafes and restaurants.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "orientation": "portrait-primary",
+  "categories": ["business", "productivity", "food"],
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Take to Bar/Kitchen",
+      "short_name": "Take Items",
+      "description": "Dispense stock items to bar or kitchen line",
+      "url": "/?tab=take",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Restock & Deliveries",
+      "short_name": "Restock",
+      "description": "Scan incoming supplier deliveries",
+      "url": "/?tab=stockin",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Physical Stock Count",
+      "short_name": "Count Audit",
+      "description": "Audit physical stock on shelves",
+      "url": "/?tab=count",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "BarStock Pro - Cafe & Restaurant Stock System",
+  "description": "High-performance, mobile-first inventory and stock control system for cafes and restaurants with PIN authentication, live dashboards, and secure license management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
