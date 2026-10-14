@@ -436,6 +436,32 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
     assert.equal(entries.entries.length, 1);
     assert.equal(entries.entries[0].status, 'submitted');
 
+    const correctionEnd = new Date();
+    const correctionStart = new Date(Math.max(
+      new Date(`${today}T00:00:00.000Z`).getTime(),
+      correctionEnd.getTime() - 2 * 60 * 60 * 1000
+    )).toISOString();
+    const invalidCorrection = await call(`/api/workforce/time-entries/${entries.entries[0].id}`, 'PATCH', {
+      tenantId: registrationData.tenant.id,
+      clockIn: correctionStart,
+      clockOut: correctionEnd.toISOString(),
+      breakMinutes: 999999,
+      reason: 'Correcting missed punch'
+    }, cookie);
+    assert.equal(invalidCorrection.status, 400);
+    const correction = await call(`/api/workforce/time-entries/${entries.entries[0].id}`, 'PATCH', {
+      tenantId: registrationData.tenant.id,
+      clockIn: correctionStart,
+      clockOut: correctionEnd.toISOString(),
+      breakMinutes: 0,
+      reason: 'Correcting missed punch'
+    }, cookie);
+    assert.equal(correction.status, 200, await correction.clone().text());
+    const timeAudit = sqlite.prepare(
+      'SELECT reason FROM employee_time_audit WHERE entry_id = ?'
+    ).get(entries.entries[0].id) as { reason: string };
+    assert.equal(timeAudit.reason, 'Correcting missed punch');
+
     const approval = await call('/api/workforce/timesheets/approve', 'POST', {
       tenantId: registrationData.tenant.id,
       entryId: entries.entries[0].id,

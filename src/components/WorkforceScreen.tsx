@@ -14,6 +14,13 @@ function initialRange(): { from: string; to: string } {
   return { from: `${today.slice(0, 8)}01`, to: today };
 }
 
+function localDateTimeInput(value: string | null | undefined): string {
+  if (!value) return '';
+  const date = new Date(value);
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
 export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({ tenantId, user, onShowToast }) => {
   const canManage = ['admin', 'manager', 'superadmin'].includes(user.role);
   const canClock = user.role !== 'superadmin';
@@ -23,6 +30,11 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({ tenantId, user
   const [busy, setBusy] = useState(false);
   const [apiReady, setApiReady] = useState(false);
   const [error, setError] = useState('');
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [correctionClockIn, setCorrectionClockIn] = useState('');
+  const [correctionClockOut, setCorrectionClockOut] = useState('');
+  const [correctionBreakMinutes, setCorrectionBreakMinutes] = useState('0');
+  const [correctionReason, setCorrectionReason] = useState('');
 
   const refresh = useCallback(async () => {
     setError('');
@@ -66,6 +78,36 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({ tenantId, user
       onShowToast(decision === 'approved' ? 'Timesheet approved.' : 'Timesheet rejected.');
     } catch (reason) {
       onShowToast(reason instanceof Error ? reason.message : 'Could not update the timesheet.', 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startCorrection = (entry: WorkforceTimeEntry) => {
+    setEditingEntryId(entry.id);
+    setCorrectionClockIn(localDateTimeInput(entry.clockIn));
+    setCorrectionClockOut(localDateTimeInput(entry.clockOut));
+    setCorrectionBreakMinutes(String(entry.breakMinutes));
+    setCorrectionReason('');
+  };
+
+  const saveCorrection = async (event: React.FormEvent, entryId: string) => {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await ApiService.correctTimeEntry({
+        tenantId,
+        entryId,
+        clockIn: new Date(correctionClockIn).toISOString(),
+        clockOut: new Date(correctionClockOut).toISOString(),
+        breakMinutes: Number(correctionBreakMinutes),
+        reason: correctionReason.trim()
+      });
+      setEditingEntryId(null);
+      await refresh();
+      onShowToast('Time correction saved and returned for approval.');
+    } catch (reason) {
+      onShowToast(reason instanceof Error ? reason.message : 'Could not correct this time entry.', 'err');
     } finally {
       setBusy(false);
     }
@@ -183,21 +225,66 @@ export const WorkforceScreen: React.FC<WorkforceScreenProps> = ({ tenantId, user
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {entries.map(entry => (
-                  <tr key={entry.id}>
-                    <td className="p-3 font-semibold text-slate-800">{entry.employeeName}</td>
-                    <td className="p-3 text-slate-600">{new Date(entry.clockIn).toLocaleString()}</td>
-                    <td className="p-3 text-slate-600">{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : '—'}</td>
-                    <td className="p-3 text-slate-700">{entry.hours ?? '—'}</td>
-                    <td className="p-3 capitalize text-slate-600">{entry.status}</td>
-                    <td className="p-3">
-                      {entry.status === 'submitted' && (
+                  <React.Fragment key={entry.id}>
+                    <tr>
+                      <td className="p-3 font-semibold text-slate-800">{entry.employeeName}</td>
+                      <td className="p-3 text-slate-600">{new Date(entry.clockIn).toLocaleString()}</td>
+                      <td className="p-3 text-slate-600">{entry.clockOut ? new Date(entry.clockOut).toLocaleString() : '—'}</td>
+                      <td className="p-3 text-slate-700">{entry.hours ?? '—'}</td>
+                      <td className="p-3 capitalize text-slate-600">{entry.status}</td>
+                      <td className="p-3">
                         <div className="flex gap-2">
-                          <button disabled={busy || !apiReady} onClick={() => void decide(entry.id, 'approved')} className="font-bold text-emerald-700 disabled:opacity-50">Approve</button>
-                          <button disabled={busy || !apiReady} onClick={() => void decide(entry.id, 'rejected')} className="font-bold text-red-700 disabled:opacity-50">Reject</button>
+                          {entry.status === 'submitted' && (
+                            <>
+                              <button disabled={busy || !apiReady} onClick={() => void decide(entry.id, 'approved')} className="font-bold text-emerald-700 disabled:opacity-50">Approve</button>
+                              <button disabled={busy || !apiReady} onClick={() => void decide(entry.id, 'rejected')} className="font-bold text-red-700 disabled:opacity-50">Reject</button>
+                            </>
+                          )}
+                          {['submitted', 'rejected'].includes(entry.status) && (
+                            <button disabled={busy || !apiReady} onClick={() => startCorrection(entry)}
+                              className="font-bold text-amber-700 disabled:opacity-50">
+                              {editingEntryId === entry.id ? 'Editing' : 'Correct'}
+                            </button>
+                          )}
                         </div>
-                      )}
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+                    {editingEntryId === entry.id && (
+                      <tr>
+                        <td colSpan={6} className="p-3">
+                          <form onSubmit={event => void saveCorrection(event, entry.id)}
+                            className="grid grid-cols-1 gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 sm:grid-cols-2 lg:grid-cols-5">
+                            <label className="text-xs font-semibold text-slate-700">Clock in
+                              <input type="datetime-local" required value={correctionClockIn}
+                                onChange={event => setCorrectionClockIn(event.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" />
+                            </label>
+                            <label className="text-xs font-semibold text-slate-700">Clock out
+                              <input type="datetime-local" required value={correctionClockOut}
+                                onChange={event => setCorrectionClockOut(event.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" />
+                            </label>
+                            <label className="text-xs font-semibold text-slate-700">Break minutes
+                              <input type="number" min="0" step="1" required value={correctionBreakMinutes}
+                                onChange={event => setCorrectionBreakMinutes(event.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" />
+                            </label>
+                            <label className="text-xs font-semibold text-slate-700 sm:col-span-2">Reason for correction
+                              <input type="text" minLength={5} maxLength={500} required value={correctionReason}
+                                onChange={event => setCorrectionReason(event.target.value)}
+                                className="mt-1 w-full rounded-lg border border-slate-200 bg-white p-2" />
+                            </label>
+                            <div className="flex items-end gap-2">
+                              <button type="submit" disabled={busy || !apiReady}
+                                className="rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Save correction</button>
+                              <button type="button" onClick={() => setEditingEntryId(null)}
+                                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700">Cancel</button>
+                            </div>
+                          </form>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
                 {entries.length === 0 && <tr><td colSpan={6} className="p-8 text-center text-slate-500">No time entries for this date range.</td></tr>}
               </tbody>

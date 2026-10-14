@@ -113,6 +113,23 @@ export class ApiService {
     await this.readResponse(response);
   }
 
+  public static async correctTimeEntry(input: {
+    tenantId: string;
+    entryId: string;
+    clockIn: string;
+    clockOut: string;
+    breakMinutes: number;
+    reason: string;
+  }): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/workforce/time-entries/${encodeURIComponent(input.entryId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(input)
+    });
+    await this.readResponse(response);
+  }
+
   public static async exportPayroll(tenantId: string, from: string, to: string): Promise<string> {
     const query = new URLSearchParams({ tenantId, from, to });
     const response = await fetch(`${this.baseUrl}/workforce/payroll/export?${query}`, {
