@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ShieldAlert,
   Building2,
@@ -20,7 +20,8 @@ import {
   Trash2,
   CheckCircle2,
   AlertTriangle,
-  Globe
+  Globe,
+  Pencil
 } from 'lucide-react';
 import { CafeTenant, SubscriptionPlan } from '../types/stock';
 import { DEFAULT_SUBSCRIPTION_PLANS } from '../data/initialData';
@@ -33,6 +34,7 @@ interface SuperAdminPortalProps {
   onSavePlans: (plans: SubscriptionPlan[]) => Promise<void>;
   publicContent: PublicSiteContent;
   onSavePublicContent: (content: PublicSiteContent, publish: boolean) => Promise<void>;
+  onChangePassword: (currentPassword: string, newPassword: string, totp: string) => Promise<void>;
   onSelectCafe: (tenant: CafeTenant) => void;
   onShowToast: (msg: string, type?: 'ok' | 'err') => void;
   onGoToLanding?: () => void;
@@ -45,11 +47,12 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
   onSavePlans,
   publicContent,
   onSavePublicContent,
+  onChangePassword,
   onSelectCafe,
   onShowToast,
   onGoToLanding
 }) => {
-  const [activeTab, setActiveTab] = useState<'clients' | 'plans' | 'content' | 'deploy'>('clients');
+  const [activeTab, setActiveTab] = useState<'clients' | 'plans' | 'content' | 'security' | 'deploy'>('clients');
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
 
@@ -74,10 +77,22 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
   const [planTerminals, setPlanTerminals] = useState('2');
   const [planMaxItems, setPlanMaxItems] = useState('150');
   const [planDesc, setPlanDesc] = useState('');
-  const [contentHeadline, setContentHeadline] = useState(publicContent.headline);
-  const [contentDescription, setContentDescription] = useState(publicContent.description);
-  const [contentFeatures, setContentFeatures] = useState(publicContent.features.join('\n'));
+  const [editingPlan, setEditingPlan] = useState<SubscriptionPlan | null>(null);
+  const [contentDraft, setContentDraft] = useState(publicContent);
   const [isSavingContent, setIsSavingContent] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordTotp, setPasswordTotp] = useState('');
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
+
+  useEffect(() => {
+    setContentDraft(publicContent);
+  }, [publicContent]);
+
+  const updateContentField = <K extends keyof PublicSiteContent>(key: K, value: PublicSiteContent[K]) => {
+    setContentDraft(current => ({ ...current, [key]: value }));
+  };
 
   // Calculate platform financial stats
   const activeTenants = tenants.filter(t => t.status === 'ACTIVE');
@@ -219,14 +234,9 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
   };
 
   const handleSaveContent = async (publish: boolean) => {
-    const content = {
-      headline: contentHeadline.trim(),
-      description: contentDescription.trim(),
-      features: contentFeatures.split('\n').map(feature => feature.trim()).filter(Boolean)
-    };
     setIsSavingContent(true);
     try {
-      await onSavePublicContent(content, publish);
+      await onSavePublicContent(contentDraft, publish);
       onShowToast(publish ? 'Public content published.' : 'Draft saved privately.', 'ok');
     } catch (error) {
       onShowToast(error instanceof Error ? error.message : 'Could not save public content.', 'err');
@@ -259,6 +269,39 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
       setPlanDesc('');
     } catch (error) {
       onShowToast(error instanceof Error ? error.message : 'Could not save the plan.', 'err');
+    }
+  };
+
+  const handleUpdatePlan = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editingPlan) return;
+    try {
+      await onSavePlans(plans.map(plan => plan.id === editingPlan.id ? editingPlan : plan));
+      onShowToast(`Plan ${editingPlan.name} updated.`, 'ok');
+      setEditingPlan(null);
+    } catch (error) {
+      onShowToast(error instanceof Error ? error.message : 'Could not update the plan.', 'err');
+    }
+  };
+
+  const handleChangePassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (newPassword !== confirmNewPassword) {
+      onShowToast('New passwords do not match.', 'err');
+      return;
+    }
+    setIsSavingPassword(true);
+    try {
+      await onChangePassword(currentPassword, newPassword, passwordTotp);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setPasswordTotp('');
+      onShowToast('Password updated. Other administrator sessions were signed out.', 'ok');
+    } catch (error) {
+      onShowToast(error instanceof Error ? error.message : 'Could not change the password.', 'err');
+    } finally {
+      setIsSavingPassword(false);
     }
   };
 
@@ -374,6 +417,16 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
             }`}
           >
             Public Content
+          </button>
+          <button
+            onClick={() => setActiveTab('security')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors ${
+              activeTab === 'security'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            Security
           </button>
         </div>
       </div>
@@ -544,24 +597,174 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
       {activeTab === 'content' && (
         <section className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-5">
           <div>
-            <h3 className="text-base font-bold text-slate-900">Public landing page content</h3>
-            <p className="text-xs text-slate-500 mt-1">Drafts remain private until explicitly published. Text is rendered as plain text.</p>
+            <h3 className="text-base font-bold text-slate-900">Public website content and branding</h3>
+            <p className="text-xs text-slate-500 mt-1">Manage the public home page, pricing copy, feature cards, brand, and logo. Plan names, prices, limits, and included features are managed in Subscription Plans. Drafts stay private until published.</p>
           </div>
-          <label className="block text-xs font-semibold text-slate-700">
-            Main headline
-            <input value={contentHeadline} maxLength={180} onChange={event => setContentHeadline(event.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
-          </label>
-          <label className="block text-xs font-semibold text-slate-700">
-            Description
-            <textarea value={contentDescription} maxLength={1000} rows={3} onChange={event => setContentDescription(event.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
-          </label>
-          <label className="block text-xs font-semibold text-slate-700">
-            Feature highlights (one per line)
-            <textarea value={contentFeatures} maxLength={2400} rows={6} onChange={event => setContentFeatures(event.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
-          </label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <label className="block text-xs font-semibold text-slate-700">
+              Brand name
+              <input value={contentDraft.brandName} maxLength={80} onChange={event => updateContentField('brandName', event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+            </label>
+            <label className="block text-xs font-semibold text-slate-700">
+              Logo URL (HTTPS or same-origin path)
+              <input value={contentDraft.logoUrl} maxLength={2048} placeholder="https://... or /images/logo.png"
+                onChange={event => updateContentField('logoUrl', event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+            </label>
+            <label className="block text-xs font-semibold text-slate-700">
+              Brand tagline
+              <input value={contentDraft.tagline} maxLength={160} onChange={event => updateContentField('tagline', event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+            </label>
+            <label className="block text-xs font-semibold text-slate-700">
+              Footer tagline
+              <input value={contentDraft.footerTagline} maxLength={160} onChange={event => updateContentField('footerTagline', event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+            </label>
+          </div>
+          <div className="border-t border-slate-100 pt-4 space-y-4">
+            <h4 className="text-sm font-bold text-slate-900">Home page hero</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="block text-xs font-semibold text-slate-700">
+                Intro label
+                <input value={contentDraft.heroEyebrow} maxLength={180} onChange={event => updateContentField('heroEyebrow', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+              <label className="block text-xs font-semibold text-slate-700">
+                Main headline
+                <input value={contentDraft.headline} maxLength={180} onChange={event => updateContentField('headline', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+              <label className="block text-xs font-semibold text-slate-700 md:col-span-2">
+                Main description
+                <textarea value={contentDraft.description} maxLength={1000} rows={3} onChange={event => updateContentField('description', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+              <label className="block text-xs font-semibold text-slate-700">
+                Primary button label
+                <input value={contentDraft.primaryCta} maxLength={80} onChange={event => updateContentField('primaryCta', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+              <label className="block text-xs font-semibold text-slate-700">
+                Home page highlight chips (one per line)
+                <textarea value={contentDraft.features.join('\n')} maxLength={2400} rows={3}
+                  onChange={event => updateContentField('features', event.target.value.split('\n').slice(0, 20))}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+            </div>
+          </div>
+          <div className="border-t border-slate-100 pt-4 space-y-4">
+            <h4 className="text-sm font-bold text-slate-900">Pricing page introduction</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="block text-xs font-semibold text-slate-700">
+                Section label
+                <input value={contentDraft.pricingEyebrow} maxLength={120} onChange={event => updateContentField('pricingEyebrow', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+              <label className="block text-xs font-semibold text-slate-700">
+                Section headline
+                <input value={contentDraft.pricingHeadline} maxLength={180} onChange={event => updateContentField('pricingHeadline', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+              <label className="block text-xs font-semibold text-slate-700 md:col-span-2">
+                Section description
+                <textarea value={contentDraft.pricingDescription} maxLength={1000} rows={3}
+                  onChange={event => updateContentField('pricingDescription', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+            </div>
+          </div>
+          <div className="border-t border-slate-100 pt-4 space-y-4">
+            <h4 className="text-sm font-bold text-slate-900">Multi-branch section</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="block text-xs font-semibold text-slate-700">
+                Section label
+                <input value={contentDraft.multiBranchEyebrow} maxLength={120}
+                  onChange={event => updateContentField('multiBranchEyebrow', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+              <label className="block text-xs font-semibold text-slate-700">
+                Section headline
+                <input value={contentDraft.multiBranchHeadline} maxLength={180}
+                  onChange={event => updateContentField('multiBranchHeadline', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+              <label className="block text-xs font-semibold text-slate-700 md:col-span-2">
+                Section description
+                <textarea value={contentDraft.multiBranchDescription} maxLength={1000} rows={3}
+                  onChange={event => updateContentField('multiBranchDescription', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+            </div>
+          </div>
+          <div className="border-t border-slate-100 pt-4 space-y-4">
+            <h4 className="text-sm font-bold text-slate-900">Features section</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <label className="block text-xs font-semibold text-slate-700">
+                Section label
+                <input value={contentDraft.featuresEyebrow} maxLength={120}
+                  onChange={event => updateContentField('featuresEyebrow', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+              <label className="block text-xs font-semibold text-slate-700">
+                Section headline
+                <input value={contentDraft.featuresHeadline} maxLength={180}
+                  onChange={event => updateContentField('featuresHeadline', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+              <label className="block text-xs font-semibold text-slate-700 md:col-span-2">
+                Section description
+                <textarea value={contentDraft.featuresDescription} maxLength={1000} rows={3}
+                  onChange={event => updateContentField('featuresDescription', event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+              </label>
+            </div>
+            <div className="space-y-3">
+              {contentDraft.featureCards.map((card, index) => (
+                <div key={index} className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-xl border border-slate-200 p-3">
+                  <div className="md:col-span-2 flex justify-end">
+                    <button type="button"
+                      onClick={() => updateContentField('featureCards', contentDraft.featureCards.filter((_, itemIndex) => itemIndex !== index))}
+                      className="text-xs text-red-600 hover:text-red-800 font-semibold flex items-center gap-1">
+                      <Trash2 className="w-3 h-3" /> Remove feature
+                    </button>
+                  </div>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Feature title
+                    <input value={card.title} maxLength={120}
+                      onChange={event => updateContentField('featureCards', contentDraft.featureCards.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, title: event.target.value } : item))}
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Feature description
+                    <textarea value={card.description} maxLength={500} rows={2}
+                      onChange={event => updateContentField('featureCards', contentDraft.featureCards.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, description: event.target.value } : item))}
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+                  </label>
+                </div>
+              ))}
+              <button type="button" disabled={contentDraft.featureCards.length >= 12}
+                onClick={() => updateContentField('featureCards', [...contentDraft.featureCards, { title: '', description: '' }])}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40 flex items-center gap-1">
+                <Plus className="w-3.5 h-3.5" /> Add feature card
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-100 pt-4">
+            <label className="block text-xs font-semibold text-slate-700">
+              Footer brand tagline
+              <input value={contentDraft.footerTagline} maxLength={160} onChange={event => updateContentField('footerTagline', event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+            </label>
+            <label className="block text-xs font-semibold text-slate-700">
+              Footer trust label
+              <input value={contentDraft.trustBadge} maxLength={80} onChange={event => updateContentField('trustBadge', event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+            </label>
+          </div>
           <div className="flex flex-wrap justify-end gap-2">
             <button disabled={isSavingContent} onClick={() => handleSaveContent(false)}
               className="rounded-xl border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-700 disabled:opacity-50">
@@ -572,6 +775,45 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
               Publish changes
             </button>
           </div>
+        </section>
+      )}
+
+      {activeTab === 'security' && (
+        <section className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 shadow-xs space-y-5 max-w-2xl">
+          <div>
+            <h3 className="text-base font-bold text-slate-900">Administrator password</h3>
+            <p className="text-xs text-slate-500 mt-1">Set or rotate your platform administrator password. Your authenticator code is required and other active sessions will be revoked.</p>
+          </div>
+          <form onSubmit={handleChangePassword} className="space-y-4">
+            <label className="block text-xs font-semibold text-slate-700">
+              Current password
+              <input required minLength={14} maxLength={256} type="password" autoComplete="current-password"
+                value={currentPassword} onChange={event => setCurrentPassword(event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+            </label>
+            <label className="block text-xs font-semibold text-slate-700">
+              New password (14–256 characters)
+              <input required minLength={14} maxLength={256} type="password" autoComplete="new-password"
+                value={newPassword} onChange={event => setNewPassword(event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+            </label>
+            <label className="block text-xs font-semibold text-slate-700">
+              Confirm new password
+              <input required minLength={14} maxLength={256} type="password" autoComplete="new-password"
+                value={confirmNewPassword} onChange={event => setConfirmNewPassword(event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+            </label>
+            <label className="block text-xs font-semibold text-slate-700">
+              Six-digit authenticator code
+              <input required inputMode="numeric" pattern="[0-9]{6}" minLength={6} maxLength={6}
+                value={passwordTotp} onChange={event => setPasswordTotp(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-mono tracking-[0.3em]" />
+            </label>
+            <button disabled={isSavingPassword}
+              className="rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50">
+              {isSavingPassword ? 'Updating password…' : 'Update password'}
+            </button>
+          </form>
         </section>
       )}
 
@@ -638,7 +880,13 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                  <span className="text-[11px] text-slate-400 font-medium">Ready to sell</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] text-slate-400 font-medium">Ready to sell</span>
+                    <button onClick={() => setEditingPlan({ ...p })}
+                      className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1">
+                      <Pencil className="w-3 h-3" /> Edit
+                    </button>
+                  </div>
                   {p.id.startsWith('plan-') && !['plan-starter', 'plan-pro', 'plan-enterprise'].includes(p.id) && (
                     <button
                       onClick={() => {
@@ -684,25 +932,24 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
             <div className="p-4 bg-red-50 rounded-2xl border border-red-200 space-y-2 text-red-900">
               <h4 className="font-bold text-red-950 text-sm">Launch blockers</h4>
               <ul className="list-disc pl-5 space-y-1">
-                <li><code>wrangler.toml</code> still contains a placeholder D1 database ID.</li>
-                <li>Inventory is stored in browser storage; the D1 sync endpoint records events but does not restore or reconcile stock.</li>
-                <li>Branch/zone onboarding, secure Super Admin invitations, email verification, and automated billing are not implemented.</li>
-                <li>Salary-period payroll, Cloudflare staging/integration tests, backups, and restore tests remain outstanding.</li>
+                <li>Production and staging D1 databases are bound and migrated, but required Cloudflare auth and Turnstile secrets are not configured. The preview health check reports degraded.</li>
+                <li>Branch/zone onboarding and durable cross-branch transfers, secure owner invitations/email verification, and automated billing are not implemented.</li>
+                <li>Salary-period calculations and statutory payroll, authenticated live end-to-end tests, backups, and restore tests remain outstanding.</li>
               </ul>
             </div>
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
               <h4 className="font-bold text-slate-900 text-sm">Required before any production release</h4>
               <ol className="list-decimal pl-5 space-y-1 text-slate-600">
-                <li>Create the Cloudflare D1 database, update its ID in <code>wrangler.toml</code>, and apply the migrations.</li>
-                <li>Configure the D1 binding, Turnstile site/secret keys, employee PIN pepper, and one-time Super Admin bootstrap secrets in the Pages environment.</li>
-                <li>Complete the listed launch blockers, then run unit, type-check, build, D1 integration, and end-to-end tests against a staging deployment.</li>
-                <li>Verify access controls, backups/restore, monitoring, and rollback before enabling customer registration.</li>
+                <li>Configure separate preview and production Turnstile keys, employee PIN pepper, and one-time Super Admin bootstrap email/token/TOTP secrets in Cloudflare Pages. Never put these in source control.</li>
+                <li>Bootstrap the platform administrator once, then verify Super Admin MFA, tenant isolation, and the full account/workforce workflows against staging.</li>
+                <li>Complete the remaining product gaps, then validate database backups and restore, monitoring, rollback, and production smoke tests.</li>
+                <li>Keep customer registration and production traffic disabled until <code>/api/health</code> reports ready and release checks pass.</li>
               </ol>
               <p className="pt-2">
                 Build locally with <code>npm run build</code>. A static-only upload of <code>dist/</code> omits the Pages Functions backend and D1 configuration; do not use it for a live deployment.
               </p>
               <p>
-                When the application is launch-ready, connect it through the <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" className="text-amber-700 font-semibold underline">Cloudflare Dashboard</a> with Pages Functions and the configured D1 binding.
+                Manage Pages environment variables and deployments through the <a href="https://dash.cloudflare.com" target="_blank" rel="noreferrer" className="text-amber-700 font-semibold underline">Cloudflare Dashboard</a>. The feature branch is preview-only; do not promote it to production until all gates pass.
               </p>
             </div>
           </div>
@@ -830,6 +1077,80 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
                   <CheckCircle2 className="w-4 h-4 text-amber-400" />
                   <span>Generate Access &amp; Activate</span>
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {editingPlan && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200">
+            <h3 className="text-base font-bold text-slate-900 mb-1">Edit Subscription Plan</h3>
+            <p className="text-xs text-slate-500 mb-4">Price and limits are saved to the server and enforced for new inventory operations.</p>
+            <form onSubmit={handleUpdatePlan} className="space-y-3 text-xs">
+              <label className="block font-semibold text-slate-700">
+                Plan name
+                <input required maxLength={100} value={editingPlan.name}
+                  onChange={event => setEditingPlan({ ...editingPlan, name: event.target.value })}
+                  className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800" />
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block font-semibold text-slate-700">
+                  Price (USD)
+                  <input required type="number" min="0" step="0.01" value={editingPlan.price}
+                    onChange={event => setEditingPlan({ ...editingPlan, price: Number(event.target.value) })}
+                    className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800" />
+                </label>
+                <label className="block font-semibold text-slate-700">
+                  Billing period
+                  <select value={editingPlan.billingPeriod}
+                    onChange={event => setEditingPlan({ ...editingPlan, billingPeriod: event.target.value as SubscriptionPlan['billingPeriod'] })}
+                    className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800">
+                    <option value="monthly">Monthly</option>
+                    <option value="quarterly">Quarterly</option>
+                    <option value="annual">Annual</option>
+                    <option value="lifetime">Lifetime</option>
+                  </select>
+                </label>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <label className="block font-semibold text-slate-700">
+                  Terminals
+                  <input required type="number" min="1" value={editingPlan.maxTerminals}
+                    onChange={event => setEditingPlan({ ...editingPlan, maxTerminals: Number(event.target.value) })}
+                    className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800" />
+                </label>
+                <label className="block font-semibold text-slate-700">
+                  Inventory items
+                  <input required type="number" min="1" value={editingPlan.maxItems}
+                    onChange={event => setEditingPlan({ ...editingPlan, maxItems: Number(event.target.value) })}
+                    className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800" />
+                </label>
+                <label className="block font-semibold text-slate-700">
+                  Branches
+                  <input required type="number" min="1" value={editingPlan.maxBranches}
+                    onChange={event => setEditingPlan({ ...editingPlan, maxBranches: Number(event.target.value) })}
+                    className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800" />
+                </label>
+              </div>
+              <label className="block font-semibold text-slate-700">
+                Description
+                <textarea rows={2} maxLength={1000} value={editingPlan.description}
+                  onChange={event => setEditingPlan({ ...editingPlan, description: event.target.value })}
+                  className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800" />
+              </label>
+              <label className="block font-semibold text-slate-700">
+                Included features (one per line)
+                <textarea rows={4} maxLength={3600} value={editingPlan.features.join('\n')}
+                  onChange={event => setEditingPlan({ ...editingPlan, features: event.target.value.split('\n').slice(0, 30) })}
+                  className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-800" />
+              </label>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setEditingPlan(null)}
+                  className="h-10 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium">Cancel</button>
+                <button type="submit"
+                  className="h-10 px-5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold">Save Plan</button>
               </div>
             </form>
           </div>

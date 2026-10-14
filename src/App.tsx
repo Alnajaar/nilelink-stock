@@ -42,7 +42,7 @@ import { NotificationService } from './services/notificationService';
 import { SyncStatusInfo } from './services/storageService';
 import { ApiService } from './services/apiService';
 import { SuperAdminLogin } from './components/SuperAdminLogin';
-import { PublicSiteContent } from './types/content';
+import { DEFAULT_PUBLIC_SITE_CONTENT, PublicSiteContent } from './types/content';
 import { OwnerLogin } from './components/OwnerLogin';
 import { WorkforceScreen } from './components/WorkforceScreen';
 
@@ -54,11 +54,7 @@ export default function App() {
   const [tenants, setTenants] = useState<CafeTenant[]>([]);
   const [activeCafe, setActiveCafe] = useState<CafeTenant | null>(null);
   const [plans, setPlans] = useState<SubscriptionPlan[]>(DEFAULT_SUBSCRIPTION_PLANS);
-  const [publicContent, setPublicContent] = useState<PublicSiteContent>({
-    headline: 'Smarter stock management for hospitality teams',
-    description: 'Control inventory, reduce waste, and coordinate every location from one place.',
-    features: ['Stock tracking', 'Branch transfers', 'Waste insights', 'Offline workflows']
-  });
+  const [publicContent, setPublicContent] = useState<PublicSiteContent>(DEFAULT_PUBLIC_SITE_CONTENT);
   const [license, setLicense] = useState(LicenseManager.getLicenseStatus('nile-flagship', 'Demo Specialty Roastery'));
 
   // Authenticated User
@@ -148,7 +144,7 @@ export default function App() {
       if (!import.meta.env.DEV) console.error('Could not load published site content:', error);
     });
 
-    // Check URL parameters for special access code: ?code=NL-... or ?mode=store/superadmin
+    // Production Super Admin sign-in has no public button; open the private ?mode=superadmin URL directly.
     const urlParams = new URLSearchParams(window.location.search);
     const codeParam = urlParams.get('code');
     const tenantParam = urlParams.get('tenant');
@@ -674,9 +670,6 @@ export default function App() {
             }
             setAppMode('store');
           }}
-          onLaunchSuperAdmin={() => {
-            handleOpenSuperAdmin();
-          }}
           onOwnerLogin={() => setAppMode('ownerLogin')}
           onNewTenantRegistered={newTenant => {
             const updated = [newTenant, ...tenants];
@@ -711,6 +704,8 @@ export default function App() {
             await ApiService.savePublicContent(content, publish);
             if (publish) setPublicContent(content);
           }}
+          onChangePassword={(currentPassword, newPassword, totp) =>
+            ApiService.changePassword(currentPassword, newPassword, totp)}
           onSaveTenants={handleSaveTenants}
           onSavePlans={handleSavePlans}
           onSelectCafe={tenant => {
@@ -964,6 +959,8 @@ export default function App() {
               await ApiService.savePublicContent(content, publish);
               if (publish) setPublicContent(content);
             }}
+            onChangePassword={(currentPassword, newPassword, totp) =>
+              ApiService.changePassword(currentPassword, newPassword, totp)}
             onSaveTenants={handleSaveTenants}
             onSavePlans={handleSavePlans}
             onSelectCafe={handleSelectCafe}

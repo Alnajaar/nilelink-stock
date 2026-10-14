@@ -462,12 +462,52 @@ async function updateContent(db: D1Database, request: Request, actor: Authentica
     throw new HttpError(400, 'Content must be an object.');
   }
   const content = body.content as Record<string, unknown>;
+  const logoUrl = content.logoUrl === undefined ? '' : content.logoUrl;
+  if (typeof logoUrl !== 'string' || logoUrl.length > 2_048 ||
+      (logoUrl !== '' && !logoUrl.startsWith('/') && !/^https:\/\/[^\\\s]+$/i.test(logoUrl)) ||
+      logoUrl.startsWith('//') || logoUrl.includes('\\') || /[\u0000-\u001f]/.test(logoUrl)) {
+    throw new HttpError(400, 'Logo URL must be a same-origin path or an HTTPS URL.');
+  }
+  const features = Array.isArray(content.features) ? content.features : [];
+  if (features.length > 20 || features.some(item => typeof item !== 'string' || item.trim().length > 120)) {
+    throw new HttpError(400, 'Invalid public feature list.');
+  }
+  const featureCards = Array.isArray(content.featureCards) ? content.featureCards : [];
+  if (featureCards.length > 12 || featureCards.some(card =>
+    !card || typeof card !== 'object' || Array.isArray(card) ||
+    typeof (card as Record<string, unknown>).title !== 'string' ||
+    typeof (card as Record<string, unknown>).description !== 'string' ||
+    ((card as Record<string, string>).title).trim().length < 2 ||
+    ((card as Record<string, string>).title).trim().length > 120 ||
+    ((card as Record<string, string>).description).trim().length < 2 ||
+    ((card as Record<string, string>).description).trim().length > 500
+  )) {
+    throw new HttpError(400, 'Invalid public feature cards.');
+  }
   const clean = {
+    brandName: boundedString(content.brandName, 'brand name', 2, 80),
+    logoUrl: logoUrl.trim(),
+    tagline: boundedString(content.tagline, 'tagline', 2, 160),
+    heroEyebrow: boundedString(content.heroEyebrow, 'hero eyebrow', 2, 180),
     headline: boundedString(content.headline, 'headline', 2, 180),
     description: boundedString(content.description, 'description', 2, 1000),
-    features: Array.isArray(content.features)
-      ? content.features.filter((item): item is string => typeof item === 'string' && item.length <= 120).slice(0, 20)
-      : []
+    features: features.map(item => (item as string).trim()).filter(Boolean),
+    primaryCta: boundedString(content.primaryCta, 'primary call to action', 2, 80),
+    pricingEyebrow: boundedString(content.pricingEyebrow, 'pricing eyebrow', 2, 120),
+    pricingHeadline: boundedString(content.pricingHeadline, 'pricing headline', 2, 180),
+    pricingDescription: boundedString(content.pricingDescription, 'pricing description', 2, 1000),
+    multiBranchEyebrow: boundedString(content.multiBranchEyebrow, 'branch section eyebrow', 2, 120),
+    multiBranchHeadline: boundedString(content.multiBranchHeadline, 'branch section headline', 2, 180),
+    multiBranchDescription: boundedString(content.multiBranchDescription, 'branch section description', 2, 1000),
+    featuresEyebrow: boundedString(content.featuresEyebrow, 'features eyebrow', 2, 120),
+    featuresHeadline: boundedString(content.featuresHeadline, 'features headline', 2, 180),
+    featuresDescription: boundedString(content.featuresDescription, 'features description', 2, 1000),
+    featureCards: featureCards.map(card => ({
+      title: (card as Record<string, string>).title.trim(),
+      description: (card as Record<string, string>).description.trim()
+    })),
+    footerTagline: boundedString(content.footerTagline, 'footer tagline', 2, 160),
+    trustBadge: boundedString(content.trustBadge, 'trust badge', 2, 80)
   };
   const now = new Date().toISOString();
   const existing = await db.prepare('SELECT version FROM site_content WHERE id = ?')

@@ -35,7 +35,6 @@ interface LandingPageProps {
   plans: SubscriptionPlan[];
   publicContent: PublicSiteContent;
   onLaunchStore: (tenant: CafeTenant, user?: Employee) => void;
-  onLaunchSuperAdmin: () => void;
   onOwnerLogin: () => void;
   onNewTenantRegistered: (tenant: CafeTenant) => void;
 }
@@ -45,7 +44,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   plans,
   publicContent,
   onLaunchStore,
-  onLaunchSuperAdmin,
   onOwnerLogin,
   onNewTenantRegistered
 }) => {
@@ -53,6 +51,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   const [calcBranches, setCalcBranches] = useState<number>(1);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>('plan-pro');
+  const featureIcons = [Brain, ShieldAlert, BellRing, FileSpreadsheet, WifiOff, Globe];
 
   // Find recommended plan for calculator
   const recommendedPlan = calcBranches === 1 ? plans[0] : calcBranches <= 2 ? plans[1] : plans[2];
@@ -86,15 +85,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
       <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center text-white shadow-lg shadow-amber-900/40">
-              <Coffee className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center text-white shadow-lg shadow-amber-900/40 overflow-hidden">
+              {publicContent.logoUrl
+                ? <img src={publicContent.logoUrl} alt="" className="w-full h-full object-cover" />
+                : <Coffee className="w-5 h-5" />}
             </div>
             <div>
               <span className="text-base font-extrabold tracking-tight text-white block leading-none">
-                BARSTOCK<span className="text-amber-500">.OS</span>
+                {publicContent.brandName}
               </span>
               <span className="text-[10px] text-slate-400 font-medium">
-                Cafe &amp; Restaurant Inventory SaaS
+                {publicContent.tagline}
               </span>
             </div>
           </div>
@@ -128,14 +129,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <span>Store Terminal</span>
             </button>}
 
-            <button
-              onClick={onLaunchSuperAdmin}
-              className="px-3.5 h-9 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-md shadow-amber-900/30 transition-all flex items-center gap-1.5"
-              title="Super Admin SaaS Control Panel"
-            >
-              <Building2 className="w-3.5 h-3.5" />
-              <span>Super Admin HQ</span>
-            </button>
           </div>
         </div>
       </header>
@@ -148,7 +141,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="max-w-5xl mx-auto px-4 sm:px-6 text-center relative z-10">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-medium mb-6 animate-pulse">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Built Exclusively for Coffee Shops, Roasteries &amp; Restaurant Chains</span>
+            <span>{publicContent.heroEyebrow}</span>
           </div>
 
           <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight leading-[1.1]">
@@ -179,7 +172,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               }}
               className="w-full sm:w-auto px-7 h-12 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm shadow-xl shadow-amber-900/40 hover:shadow-amber-800/60 transition-all flex items-center justify-center gap-2 active:scale-95"
             >
-              <span>Start 14-Day Free Trial</span>
+              <span>{publicContent.primaryCta}</span>
               <ArrowRight className="w-4 h-4" />
             </button>
 
@@ -231,7 +224,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
             {/* Store Owner / Admin */}
             <div className="p-5 rounded-2xl bg-slate-900 border border-amber-500/30 hover:border-amber-500/60 transition-all flex flex-col justify-between shadow-lg">
               <div>
@@ -317,27 +310,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </button>
             </div>
 
-            {/* Super Admin HQ */}
-            <div className="p-5 rounded-2xl bg-gradient-to-b from-slate-900 to-amber-950/40 border border-amber-500/40 flex flex-col justify-between shadow-xl">
-              <div>
-                <div className="w-8 h-8 rounded-xl bg-amber-500/30 text-amber-300 flex items-center justify-center mb-3">
-                  <Building2 className="w-4 h-4" />
-                </div>
-                <h3 className="font-bold text-sm text-amber-300">Super Admin (You)</h3>
-                <p className="text-[10px] text-amber-400/80 font-mono mt-0.5">SaaS Owner HQ</p>
-                <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                  Manage all cafes, monitor expiring licenses, edit plan limits, and see platform
-                  MRR.
-                </p>
-              </div>
-              <button
-                onClick={onLaunchSuperAdmin}
-                className="mt-4 w-full h-9 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
-              >
-                <span>Launch Super Admin</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
           </div>
         </div>
       </section>}
@@ -347,14 +319,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="text-center max-w-2xl mx-auto mb-10">
             <span className="text-amber-500 text-xs font-bold tracking-wider uppercase">
-              Transparent, Scalable SaaS Pricing
+              {publicContent.pricingEyebrow}
             </span>
             <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight mt-1">
-              Choose the Plan Sized for Your Stock
+              {publicContent.pricingHeadline}
             </h2>
             <p className="text-sm text-slate-400 mt-2">
-              From a single kiosk with limited items to an expanding multi-branch chain managing
-              thousands of SKUs across multiple locations.
+              {publicContent.pricingDescription}
             </p>
 
             {/* Billing cycle switcher */}
@@ -550,17 +521,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 text-xs font-semibold mb-4">
                 <Building2 className="w-3.5 h-3.5" />
-                <span>Multi-Location Architecture</span>
+                <span>{publicContent.multiBranchEyebrow}</span>
               </div>
               <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight leading-tight">
-                One Account. Unlimited Branches.{' '}
-                <span className="text-amber-400">Zero Cross-Store Data Leaks.</span>
+                {publicContent.multiBranchHeadline}
               </h2>
               <p className="mt-4 text-sm text-slate-300 leading-relaxed">
-                When you sell NileLink to single coffee shops, they only see their own store. When a
-                restaurateur owns 3, 4, or 5 coffee shops, they get the Enterprise Multi-Branch
-                Switch — allowing them to switch between locations in 1 click, compare branch
-                stock burns, and transfer items without confusion.
+                {publicContent.multiBranchDescription}
               </p>
 
               <div className="mt-6 space-y-3.5 text-xs text-slate-300">
@@ -676,83 +643,29 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="max-w-7xl mx-auto px-4 sm:px-6">
           <div className="text-center max-w-2xl mx-auto mb-14">
             <span className="text-amber-500 text-xs font-bold tracking-wider uppercase">
-              Engineered for Real Hospitality
+              {publicContent.featuresEyebrow}
             </span>
             <h2 className="text-3xl font-black text-white tracking-tight mt-1">
-              The Next-Gen Bar Operating System
+              {publicContent.featuresHeadline}
             </h2>
             <p className="text-sm text-slate-400 mt-2">
-              Every detail is tuned for speed, anti-theft accountability, and reliability in busy
-              service shifts.
+              {publicContent.featuresDescription}
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors">
-              <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4">
-                <Brain className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-white">ML Predictive Stock Restock</h3>
-              <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                Machine learning algorithm calculates historical velocity and auto-suggests reorder
-                quantities days before running out.
-              </p>
-            </div>
-
-            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors">
-              <div className="w-10 h-10 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center mb-4">
-                <ShieldAlert className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-white">Smart Shrinkage &amp; Theft Audit</h3>
-              <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                Compares physical counts against expected logs to automatically isolate missing units,
-                suspected theft, and unrecorded drain.
-              </p>
-            </div>
-
-            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors">
-              <div className="w-10 h-10 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center mb-4">
-                <BellRing className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-white">Web Push Notification Service</h3>
-              <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                Dispatches background push notifications directly to admin phones even when the
-                browser window is minimized or closed.
-              </p>
-            </div>
-
-            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors">
-              <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center mb-4">
-                <FileSpreadsheet className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-white">Branded Tax &amp; Payroll PDFs</h3>
-              <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                One-click export of formal, formatted PDF reports with company tax numbers, authorized
-                manager signatures, and valuation stamps.
-              </p>
-            </div>
-
-            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors">
-              <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4">
-                <WifiOff className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-white">Offline Basement Queue</h3>
-              <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                Staff can continue logging items in subterranean cold rooms without Wi-Fi. Queues sync
-                silently the moment connection returns.
-              </p>
-            </div>
-
-            <div className="p-6 rounded-3xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors">
-              <div className="w-10 h-10 rounded-2xl bg-purple-500/20 text-purple-400 flex items-center justify-center mb-4">
-                <Globe className="w-5 h-5" />
-              </div>
-              <h3 className="font-bold text-base text-white">Cloudflare Edge Deployment Ready</h3>
-              <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                Engineered for global low-latency deployment on Cloudflare Pages and Workers with zero
-                server maintenance.
-              </p>
-            </div>
+            {publicContent.featureCards.map((card, index) => {
+              const FeatureIcon = featureIcons[index % featureIcons.length];
+              return (
+                <div key={`${card.title}-${index}`} className="p-6 rounded-3xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition-colors">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4">
+                    <FeatureIcon className="w-5 h-5" />
+                  </div>
+                  <h3 className="font-bold text-base text-white">{card.title}</h3>
+                  <p className="text-xs text-slate-400 mt-2 leading-relaxed">{card.description}</p>
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -764,19 +677,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             <div className="w-6 h-6 rounded-lg bg-amber-600 flex items-center justify-center text-white font-bold text-xs">
               B
             </div>
-            <span className="text-slate-300 font-bold">BarStock.OS</span>
-            <span>· Multi-Tenant Cafe &amp; Restaurant SaaS</span>
+            <span className="text-slate-300 font-bold">{publicContent.brandName}</span>
+            <span>· {publicContent.footerTagline}</span>
           </div>
 
           <div className="flex items-center gap-6">
-            <button
-              onClick={onLaunchSuperAdmin}
-              className="text-amber-400 hover:underline flex items-center gap-1 font-semibold"
-            >
-              <Building2 className="w-3.5 h-3.5" />
-              <span>Super Admin SaaS Portal</span>
-            </button>
-            <span>Cloudflare Edge Certified</span>
+            <span>{publicContent.trustBadge}</span>
           </div>
         </div>
       </footer>

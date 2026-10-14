@@ -4,8 +4,8 @@ pages_build_output_dir = "./dist"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "nilelink-stock"
-database_id = "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
+database_name = "nilelink-stock-production"
+database_id = "c81e26e6-fa15-4093-b24c-f404f50293cc"
 migrations_dir = "migrations"
 
 [env.preview]

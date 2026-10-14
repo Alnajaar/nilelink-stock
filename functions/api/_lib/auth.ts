@@ -113,6 +113,50 @@ export async function handleAuthRequest(request: Request, env: AuthEnv): Promise
   requireSameOrigin(request);
   const db = requireDatabase(env);
 
+  if (request.method === 'POST' && pathname === '/api/auth/change-password') {
+    const user = await getSession(request, env);
+    if (!user) throw new HttpError(401, 'Authentication required.');
+    const body = await readJson<LoginBody & { newPassword?: unknown }>(request);
+    await enforceLoginRateLimit(
+      db,
+      `password-change:${request.headers.get('CF-Connecting-IP') || 'unknown'}:${user.id}`
+    );
+    const currentPassword = validatePasswordForLogin(body.password);
+    const newPassword = validatePassword(body.newPassword);
+    if (currentPassword === newPassword) throw new HttpError(400, 'Choose a different new password.');
+    if (user.role === 'platform_admin' &&
+        (!env.BOOTSTRAP_ADMIN_TOTP_SECRET || typeof body.totp !== 'string' ||
+          !(await verifyTotp(env.BOOTSTRAP_ADMIN_TOTP_SECRET, body.totp)))) {
+      throw new HttpError(401, 'Authenticator code is invalid.');
+    }
+    const existing = await authenticate(db, user.email, currentPassword);
+    if (!existing || existing.id !== user.id) throw new HttpError(401, 'Current password is incorrect.');
+    const credentials = await hashPassword(newPassword);
+    await db.batch([
+      db.prepare(
+        `UPDATE users SET password_hash = ?, password_salt = ?
+         WHERE id = ? AND password_hash = ? AND password_salt = ?`
+      ).bind(credentials.hash, credentials.salt, user.id, existing.passwordHash, existing.passwordSalt),
+      db.prepare(
+        `INSERT INTO audit_events (id, tenant_id, actor_id, action, entity_type, entity_id, details_json, created_at)
+         SELECT ?, NULL, ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (SELECT 1 FROM users WHERE id = ? AND password_hash = ? AND password_salt = ?)`
+      ).bind(
+        id(), user.id, 'auth.password_changed', 'user', user.id, '{}', new Date().toISOString(),
+        user.id, credentials.hash, credentials.salt
+      ),
+      db.prepare(
+        `DELETE FROM sessions WHERE user_id = ?
+         AND EXISTS (SELECT 1 FROM users WHERE id = ? AND password_hash = ? AND password_salt = ?)`
+      ).bind(user.id, user.id, credentials.hash, credentials.salt)
+    ]);
+    const authenticated = await authenticate(db, user.email, newPassword);
+    if (!authenticated || authenticated.id !== user.id) {
+      throw new HttpError(409, 'Password could not be changed. Please sign in again.');
+    }
+    return createSession(db, env, asSessionUser(authenticated));
+  }
+
   if (request.method === 'POST' && pathname === '/api/auth/setup') {
     const body = await readJson<LoginBody & { token?: unknown }>(request);
     const configuredEmail = env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase();

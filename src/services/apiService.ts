@@ -164,6 +164,16 @@ export class ApiService {
     await this.readResponse(response);
   }
 
+  public static async changePassword(currentPassword: string, newPassword: string, totp: string): Promise<void> {
+    const response = await fetch(`${this.baseUrl}/auth/change-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ password: currentPassword, newPassword, totp })
+    });
+    await this.readResponse(response);
+  }
+
   public static async getTurnstileSiteKey(): Promise<string | null> {
     const response = await fetch(`${this.baseUrl}/auth/config`);
     const data = await this.readResponse<{ turnstileSiteKey: string | null }>(response);
@@ -180,12 +190,22 @@ export class ApiService {
   public static async getPublicContent(): Promise<PublicSiteContent> {
     const response = await fetch(`${this.baseUrl}/content`);
     const data = await this.readResponse<{ content: PublicSiteContent }>(response);
-    if (!data.content || typeof data.content.headline !== 'string' ||
-        typeof data.content.description !== 'string' || !Array.isArray(data.content.features) ||
-        !data.content.features.every(feature => typeof feature === 'string')) {
+    const content = data.content;
+    if (!content || typeof content.brandName !== 'string' || typeof content.logoUrl !== 'string' ||
+        typeof content.tagline !== 'string' || typeof content.heroEyebrow !== 'string' ||
+        typeof content.headline !== 'string' || typeof content.description !== 'string' ||
+        !Array.isArray(content.features) || !content.features.every(feature => typeof feature === 'string') ||
+        typeof content.primaryCta !== 'string' || typeof content.pricingEyebrow !== 'string' ||
+        typeof content.pricingHeadline !== 'string' || typeof content.pricingDescription !== 'string' ||
+        typeof content.multiBranchEyebrow !== 'string' || typeof content.multiBranchHeadline !== 'string' ||
+        typeof content.multiBranchDescription !== 'string' || typeof content.featuresEyebrow !== 'string' ||
+        typeof content.featuresHeadline !== 'string' || typeof content.featuresDescription !== 'string' ||
+        !Array.isArray(content.featureCards) ||
+        !content.featureCards.every(card => card && typeof card.title === 'string' && typeof card.description === 'string') ||
+        typeof content.footerTagline !== 'string' || typeof content.trustBadge !== 'string') {
       throw new Error('The server returned invalid public website content.');
     }
-    return data.content;
+    return content;
   }
 
   public static async getInventory(tenantId: string): Promise<StockItem[]> {
@@ -233,9 +253,26 @@ export class ApiService {
   }
 
   public static async savePublicContent(content: {
+    brandName: string;
+    logoUrl: string;
+    tagline: string;
+    heroEyebrow: string;
     headline: string;
     description: string;
     features: string[];
+    primaryCta: string;
+    pricingEyebrow: string;
+    pricingHeadline: string;
+    pricingDescription: string;
+    multiBranchEyebrow: string;
+    multiBranchHeadline: string;
+    multiBranchDescription: string;
+    featuresEyebrow: string;
+    featuresHeadline: string;
+    featuresDescription: string;
+    featureCards: PublicSiteContent['featureCards'];
+    footerTagline: string;
+    trustBadge: string;
   }, publish: boolean): Promise<void> {
     const response = await fetch(`${this.baseUrl}/content`, {
       method: 'PUT',

@@ -3,6 +3,7 @@ import test from 'node:test';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { onRequest } from '../functions/api/[[route]].ts';
 import { D1Database, D1Statement } from '../functions/api/_lib/security.ts';
+import { DEFAULT_PUBLIC_SITE_CONTENT } from '../src/types/content.ts';
 
 class SqliteStatement implements D1Statement {
   private parameters: unknown[] = [];
@@ -93,6 +94,7 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
   sqlite.exec('PRAGMA foreign_keys = ON;');
   const migration = await import('node:fs').then(fs => fs.readFileSync('migrations/0001_core.sql', 'utf8'));
   sqlite.exec(migration);
+  sqlite.exec(await import('node:fs').then(fs => fs.readFileSync('migrations/0002_public_site_controls.sql', 'utf8')));
 
   const db = new SqliteD1(sqlite);
   const env = {
@@ -482,15 +484,32 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
     const contentUpdate = await call('/api/content', 'PUT', {
       publish: true,
       content: {
+        ...DEFAULT_PUBLIC_SITE_CONTENT,
+        brandName: 'NileLink Stock',
+        logoUrl: 'https://assets.example.com/logo.png',
         headline: 'A new public headline',
-        description: 'A published description for test coverage.',
-        features: ['Live stock']
+        pricingHeadline: 'Plans that fit your business'
       }
     }, adminCookie);
     assert.equal(contentUpdate.status, 200);
     const publicContent = await call('/api/content');
-    const published = await publicContent.json() as { content: { headline: string } };
+    const published = await publicContent.json() as {
+      content: { brandName: string; logoUrl: string; headline: string; pricingHeadline: string };
+    };
+    assert.equal(published.content.brandName, 'NileLink Stock');
+    assert.equal(published.content.logoUrl, 'https://assets.example.com/logo.png');
     assert.equal(published.content.headline, 'A new public headline');
+    assert.equal(published.content.pricingHeadline, 'Plans that fit your business');
+    const invalidLogo = await call('/api/content', 'PUT', {
+      publish: true,
+      content: { ...DEFAULT_PUBLIC_SITE_CONTENT, logoUrl: 'javascript:alert(1)' }
+    }, adminCookie);
+    assert.equal(invalidLogo.status, 400);
+    const unauthenticatedContentUpdate = await call('/api/content', 'PUT', {
+      publish: true,
+      content: DEFAULT_PUBLIC_SITE_CONTENT
+    });
+    assert.equal(unauthenticatedContentUpdate.status, 401);
 
     const ownerSubscriptionChange = await call(
       `/api/tenants/${registrationData.tenant.id}`,
@@ -515,6 +534,27 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
       adminCookie
     );
     assert.equal(adminReactivation.status, 200);
+
+    const passwordChange = await call('/api/auth/change-password', 'POST', {
+      password: 'platform admin password is sufficiently long',
+      newPassword: 'a different platform administrator password',
+      totp: await currentTotp(env.BOOTSTRAP_ADMIN_TOTP_SECRET)
+    }, adminCookie);
+    assert.equal(passwordChange.status, 200);
+    const refreshedAdminCookie = passwordChange.headers.get('set-cookie')?.split(';')[0];
+    assert.ok(refreshedAdminCookie);
+    assert.equal((await call('/api/tenants', 'GET', undefined, adminCookie)).status, 401);
+    assert.equal((await call('/api/auth/login', 'POST', {
+      email: env.BOOTSTRAP_ADMIN_EMAIL,
+      password: 'platform admin password is sufficiently long',
+      totp: await currentTotp(env.BOOTSTRAP_ADMIN_TOTP_SECRET)
+    })).status, 401);
+    const updatedPasswordLogin = await call('/api/auth/login', 'POST', {
+      email: env.BOOTSTRAP_ADMIN_EMAIL,
+      password: 'a different platform administrator password',
+      totp: await currentTotp(env.BOOTSTRAP_ADMIN_TOTP_SECRET)
+    });
+    assert.equal(updatedPasswordLogin.status, 200);
   } finally {
     globalThis.fetch = originalFetch;
     sqlite.close();
