@@ -120,6 +120,22 @@ CREATE TABLE inventory_items (
 
 CREATE INDEX inventory_items_tenant_name_idx ON inventory_items(tenant_id, name COLLATE NOCASE);
 
+CREATE TRIGGER inventory_items_plan_limit
+BEFORE INSERT ON inventory_items
+WHEN NOT EXISTS (
+  SELECT 1 FROM inventory_items
+  WHERE tenant_id = NEW.tenant_id AND id = NEW.id
+) AND (
+  SELECT COUNT(*) FROM inventory_items WHERE tenant_id = NEW.tenant_id
+) >= (
+  SELECT p.max_items
+  FROM tenants t JOIN plans p ON p.id = t.plan_id
+  WHERE t.id = NEW.tenant_id
+)
+BEGIN
+  SELECT RAISE(ABORT, 'inventory_item_limit_exceeded');
+END;
+
 CREATE TABLE sync_operations (
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   operation_id TEXT NOT NULL,

@@ -101,6 +101,7 @@ export default function App() {
   }, []);
 
   const loadTenantData = useCallback((cafeId: string) => {
+    inventoryLoadVersion.current++;
     setItems(StorageService.getItems(cafeId));
     setSuppliers(StorageService.getSuppliers(cafeId));
     setEmployees(StorageService.getEmployees(cafeId));

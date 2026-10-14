@@ -446,8 +446,50 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
     const adminTenants = await call('/api/tenants', 'GET', undefined, adminCookie);
     const managed = await adminTenants.json() as { tenants: unknown[] };
     assert.equal(managed.tenants.length, 2);
-    const planUpdate = await call('/api/plans/plan-starter', 'PUT', { price: 35 }, adminCookie);
+    const planUpdate = await call('/api/plans/plan-starter', 'PUT', { price: 35, maxItems: 1 }, adminCookie);
     assert.equal(planUpdate.status, 200);
+    assert.throws(() => sqlite.prepare(
+      `INSERT INTO inventory_items (tenant_id, id, name, current_stock, data_json, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      registrationData.tenant.id,
+      'concurrent-over-limit-item',
+      'Concurrent Item',
+      1,
+      JSON.stringify({ id: 'concurrent-over-limit-item' }),
+      new Date().toISOString()
+    ), /inventory_item_limit_exceeded/);
+    const overPlanInventory = await call('/api/sync', 'POST', {
+      cafeId: registrationData.tenant.id,
+      actions: [{
+        id: 'operation-over-plan-item-limit',
+        actionType: 'ADD_ITEM',
+        payload: {
+          item: {
+            id: 'second-item',
+            name: 'Oat Milk',
+            category: 'Dairy',
+            unit: 'litre',
+            openingStock: 3,
+            currentStock: 3,
+            minLevel: 1,
+            maxLevel: 8,
+            totalIn: 0,
+            totalOut: 0,
+            totalWaste: 0,
+            lastUpdated: new Date().toISOString()
+          }
+        }
+      }]
+    }, cookie);
+    assert.equal(overPlanInventory.status, 409);
+    const cappedInventory = await call(
+      `/api/inventory?tenantId=${registrationData.tenant.id}`,
+      'GET',
+      undefined,
+      cookie
+    );
+    assert.equal(((await cappedInventory.json()) as { items: unknown[] }).items.length, 1);
     const contentUpdate = await call('/api/content', 'PUT', {
       publish: true,
       content: {

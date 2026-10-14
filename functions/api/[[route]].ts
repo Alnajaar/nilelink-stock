@@ -257,8 +257,8 @@ export async function onRequest(context: {
       requireSameOrigin(request);
       const body = await readJson<{ cafeId?: unknown; actions?: unknown }>(request, 256_000);
       if (typeof body.cafeId !== 'string' || !Array.isArray(body.actions) ||
-          body.actions.length < 1 || body.actions.length > 100) {
-        throw new HttpError(400, 'A tenant and 1–100 sync operations are required.');
+          body.actions.length < 1 || body.actions.length > 20) {
+        throw new HttpError(400, 'A tenant and 1–20 sync operations are required.');
       }
       const user = await requireTenantRole(request, env, body.cafeId, ['owner', 'admin', 'manager', 'teamlead', 'staff']);
       return await persistSyncOperations(requireDatabase(env), body.cafeId, user, body.actions);
@@ -271,6 +271,9 @@ export async function onRequest(context: {
     throw new HttpError(404, 'API route was not found.');
   } catch (error) {
     if (error instanceof HttpError) return json({ error: error.message }, error.status);
+    if (error instanceof Error && error.message.includes('inventory_item_limit_exceeded')) {
+      return json({ error: 'This inventory has reached the item limit for the current plan.' }, 409);
+    }
     console.error('API request failed', {
       path: url.pathname,
       method: request.method,
@@ -748,7 +751,7 @@ async function persistSyncOperations(
       payloadJson, occurredAt, operation.now
     ));
   }
-  if (statements.length > 400) {
+  if (statements.length > 1_000) {
     throw new HttpError(413, 'Too many inventory changes in one sync request.');
   }
   await db.batch(statements);

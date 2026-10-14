@@ -229,8 +229,8 @@ export class StorageService {
       }
 
       for (const [tenantId, tenantActions] of actionsByTenant) {
-        for (let offset = 0; offset < tenantActions.length; offset += 100) {
-          const batch = tenantActions.slice(offset, offset + 100);
+        for (let offset = 0; offset < tenantActions.length; offset += 20) {
+          const batch = tenantActions.slice(offset, offset + 20);
           try {
             const response = await fetch('/api/sync', {
               method: 'POST',
