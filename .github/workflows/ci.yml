@@ -27,6 +27,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Check dependency advisories
+        run: npm audit --audit-level=high
+
       - name: Run API and security tests
         run: npm test
 
