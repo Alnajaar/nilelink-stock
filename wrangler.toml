@@ -7,3 +7,10 @@ binding = "DB"
 database_name = "nilelink-stock"
 database_id = "REPLACE_WITH_CLOUDFLARE_D1_DATABASE_ID"
 migrations_dir = "migrations"
+
+[env.preview]
+[[env.preview.d1_databases]]
+binding = "DB"
+database_name = "nilelink-stock-staging"
+database_id = "0ac682fe-519e-4461-bf93-96c998d60b29"
+migrations_dir = "migrations"

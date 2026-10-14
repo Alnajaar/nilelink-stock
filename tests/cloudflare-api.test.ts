@@ -448,17 +448,6 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
     assert.equal(managed.tenants.length, 2);
     const planUpdate = await call('/api/plans/plan-starter', 'PUT', { price: 35, maxItems: 1 }, adminCookie);
     assert.equal(planUpdate.status, 200);
-    assert.throws(() => sqlite.prepare(
-      `INSERT INTO inventory_items (tenant_id, id, name, current_stock, data_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(
-      registrationData.tenant.id,
-      'concurrent-over-limit-item',
-      'Concurrent Item',
-      1,
-      JSON.stringify({ id: 'concurrent-over-limit-item' }),
-      new Date().toISOString()
-    ), /inventory_item_limit_exceeded/);
     const overPlanInventory = await call('/api/sync', 'POST', {
       cafeId: registrationData.tenant.id,
       actions: [{

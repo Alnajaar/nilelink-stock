@@ -271,9 +271,6 @@ export async function onRequest(context: {
     throw new HttpError(404, 'API route was not found.');
   } catch (error) {
     if (error instanceof HttpError) return json({ error: error.message }, error.status);
-    if (error instanceof Error && error.message.includes('inventory_item_limit_exceeded')) {
-      return json({ error: 'This inventory has reached the item limit for the current plan.' }, 409);
-    }
     console.error('API request failed', {
       path: url.pathname,
       method: request.method,
@@ -529,13 +526,43 @@ async function saveInventory(
   const now = new Date().toISOString();
   const statements = items.map(item => db.prepare(
     `INSERT INTO inventory_items (tenant_id, id, name, current_stock, data_json, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+     SELECT ?, ?, ?, ?, ?, ?
+     WHERE EXISTS (
+       SELECT 1 FROM inventory_items WHERE tenant_id = ? AND id = ?
+     ) OR (
+       SELECT COUNT(*) FROM inventory_items WHERE tenant_id = ?
+     ) < (
+       SELECT p.max_items FROM tenants t JOIN plans p ON p.id = t.plan_id WHERE t.id = ?
+     )
      ON CONFLICT (tenant_id, id) DO UPDATE SET
-       name = excluded.name, current_stock = excluded.current_stock,
-       data_json = excluded.data_json, updated_at = excluded.updated_at`
-  ).bind(tenantId, item.id, item.name, item.currentStock, JSON.stringify(item), now));
+       name = excluded.name,
+       current_stock = inventory_items.current_stock,
+       data_json = json_set(
+         excluded.data_json,
+         '$.currentStock', inventory_items.current_stock,
+         '$.totalIn', json_extract(inventory_items.data_json, '$.totalIn'),
+         '$.totalOut', json_extract(inventory_items.data_json, '$.totalOut'),
+         '$.totalWaste', json_extract(inventory_items.data_json, '$.totalWaste')
+       ),
+       updated_at = excluded.updated_at`
+  ).bind(
+    tenantId, item.id, item.name, item.currentStock, JSON.stringify(item), now,
+    tenantId, item.id, tenantId, tenantId
+  ));
   for (let index = 0; index < statements.length; index += 100) {
     await db.batch(statements.slice(index, index + 100));
+  }
+  const storedIds = new Set<string>();
+  for (let index = 0; index < items.length; index += 100) {
+    const batch = items.slice(index, index + 100);
+    const result = await db.prepare(
+      `SELECT id FROM inventory_items WHERE tenant_id = ?
+       AND id IN (${batch.map(() => '?').join(',')})`
+    ).bind(tenantId, ...batch.map(item => item.id)).all<{ id: string }>();
+    result.results.forEach(row => storedIds.add(row.id));
+  }
+  if (storedIds.size !== items.length) {
+    throw new HttpError(409, 'This inventory exceeds the item limit for the current plan.');
   }
   const operationStatements = operationIds.map(operationId => db.prepare(
     `INSERT OR IGNORE INTO sync_operations (tenant_id, operation_id, result_json, created_at)
@@ -546,9 +573,7 @@ async function saveInventory(
     JSON.stringify({ operationId, accepted: true, includedInSnapshot: true }),
     now
   ));
-  for (let index = 0; index < operationStatements.length; index += 100) {
-    await db.batch(operationStatements.slice(index, index + 100));
-  }
+  if (operationStatements.length) await db.batch(operationStatements);
   await audit(db, actor.id, tenantId, 'inventory.snapshot_saved', 'inventory', tenantId, {
     itemCount: items.length,
     includedPendingOperationCount: operationIds.length
@@ -631,7 +656,7 @@ async function persistSyncOperations(
     const action = value as Record<string, unknown>;
     if (typeof action.id !== 'string' || action.id.length < 1 || action.id.length > 100 ||
         typeof action.actionType !== 'string' ||
-      !['STOCK_OUT', 'STOCK_IN', 'WASTE', 'STOCK_COUNT', 'UPDATE_ITEM', 'ADD_ITEM', 'IMPORT_ITEMS'].includes(action.actionType) ||
+      !['STOCK_OUT', 'STOCK_IN', 'WASTE', 'STOCK_COUNT', 'UPDATE_ITEM', 'ADD_ITEM'].includes(action.actionType) ||
         !action.payload || typeof action.payload !== 'object' || Array.isArray(action.payload)) {
       throw new HttpError(400, 'Invalid sync operation.');
     }
@@ -647,15 +672,9 @@ async function persistSyncOperations(
       : now;
     const recordId = id();
     const payload = action.payload as Record<string, unknown>;
-    let inventoryItems: InventoryItemRecord[] = [];
-    if (['UPDATE_ITEM', 'ADD_ITEM'].includes(action.actionType)) {
-      inventoryItems = [validateInventoryItem(payload.item)];
-    } else if (action.actionType === 'IMPORT_ITEMS') {
-      if (!Array.isArray(payload.items) || payload.items.length < 1 || payload.items.length > 500) {
-        throw new HttpError(400, 'Invalid inventory import operation.');
-      }
-      inventoryItems = payload.items.map(validateInventoryItem);
-    }
+    const inventoryItems = ['UPDATE_ITEM', 'ADD_ITEM'].includes(action.actionType)
+      ? [validateInventoryItem(payload.item)]
+      : [];
     const movements = await resolveInventoryMovements(
       db,
       tenantId,
@@ -668,13 +687,6 @@ async function persistSyncOperations(
         'SELECT data_json AS dataJson FROM inventory_items WHERE tenant_id = ? AND id = ?'
       ).bind(tenantId, inventoryItem.id).first<{ dataJson: string }>();
       if (!existing) stagedInventoryIds.add(inventoryItem.id);
-      if (existing && action.actionType === 'UPDATE_ITEM') {
-        const current = JSON.parse(existing.dataJson) as InventoryItemRecord;
-        inventoryItem.currentStock = current.currentStock;
-        inventoryItem.totalIn = current.totalIn;
-        inventoryItem.totalOut = current.totalOut;
-        inventoryItem.totalWaste = current.totalWaste;
-      }
     }
     if (inventoryItems.length > 0) {
       const ids = new Set<string>();
@@ -707,20 +719,37 @@ async function persistSyncOperations(
   for (const operation of prepared) {
     const { action, recordId, occurredAt, payloadJson, inventoryItems, movements } = operation;
     const operationId = action.id as string;
-    statements.push(db.prepare(
-      `INSERT OR IGNORE INTO sync_operations (tenant_id, operation_id, result_json, created_at)
-       VALUES (?, ?, ?, ?)`
-    ).bind(tenantId, operationId, JSON.stringify({ operationId, accepted: true }), operation.now));
     for (const inventoryItem of inventoryItems) {
       statements.push(db.prepare(
         `INSERT INTO inventory_items (tenant_id, id, name, current_stock, data_json, updated_at)
-         SELECT ?, ?, ?, ?, ?, ? WHERE changes() = 1
+         SELECT ?, ?, ?, ?, ?, ?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM sync_operations WHERE tenant_id = ? AND operation_id = ?
+         ) AND (
+           EXISTS (SELECT 1 FROM inventory_items WHERE tenant_id = ? AND id = ?)
+           OR (
+             SELECT COUNT(*) FROM inventory_items WHERE tenant_id = ?
+           ) < (
+             SELECT p.max_items FROM tenants t JOIN plans p ON p.id = t.plan_id WHERE t.id = ?
+           )
+         )
          ON CONFLICT (tenant_id, id) DO UPDATE SET
-           name = excluded.name, current_stock = excluded.current_stock,
-           data_json = excluded.data_json, updated_at = excluded.updated_at`
+           name = excluded.name,
+           current_stock = inventory_items.current_stock,
+           data_json = json_set(
+             excluded.data_json,
+             '$.currentStock', inventory_items.current_stock,
+             '$.totalIn', json_extract(inventory_items.data_json, '$.totalIn'),
+             '$.totalOut', json_extract(inventory_items.data_json, '$.totalOut'),
+             '$.totalWaste', json_extract(inventory_items.data_json, '$.totalWaste')
+           ),
+           updated_at = excluded.updated_at`
       ).bind(
         tenantId, inventoryItem.id, inventoryItem.name, inventoryItem.currentStock,
-        JSON.stringify(inventoryItem), operation.now
+        JSON.stringify(inventoryItem),
+        operation.now,
+        tenantId, operationId,
+        tenantId, inventoryItem.id, tenantId, tenantId
       ));
     }
     for (const movement of movements) {
@@ -737,18 +766,31 @@ async function persistSyncOperations(
                '$.lastUpdated', ?
              ),
              updated_at = ?
-         WHERE tenant_id = ? AND id = ? AND changes() = 1`
+             WHERE tenant_id = ? AND id = ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM sync_operations WHERE tenant_id = ? AND operation_id = ?
+               )`
       ).bind(
-        movement.quantity, movement.quantity, movement.quantity, now, now, tenantId, movement.itemId
+        movement.quantity, movement.quantity, movement.quantity, now, now,
+        tenantId, movement.itemId, tenantId, operationId
       ));
     }
     statements.push(db.prepare(
       `INSERT INTO inventory_events (id, tenant_id, actor_id, action_type, payload_json, occurred_at, created_at)
        SELECT ?, ?, ?, ?, ?, ?, ?
-       WHERE changes() = 1`
+       WHERE NOT EXISTS (
+             SELECT 1 FROM sync_operations WHERE tenant_id = ? AND operation_id = ?
+       )${inventoryItems.length > 0 || movements.length > 0 ? ' AND changes() = 1' : ''}`
     ).bind(
       recordId, tenantId, user.id, action.actionType as string,
-      payloadJson, occurredAt, operation.now
+      payloadJson, occurredAt, operation.now,
+      tenantId, operationId
+    ));
+    statements.push(db.prepare(
+      `INSERT OR IGNORE INTO sync_operations (tenant_id, operation_id, result_json, created_at)
+       SELECT ?, ?, ?, ? WHERE changes() = 1`
+    ).bind(
+      tenantId, operationId, JSON.stringify({ operationId, accepted: true }), operation.now
     ));
   }
   if (statements.length > 1_000) {
@@ -758,7 +800,9 @@ async function persistSyncOperations(
   const count = await db.prepare(
     `SELECT COUNT(*) AS count FROM sync_operations WHERE tenant_id = ? AND operation_id IN (${accepted.map(() => '?').join(',')})`
   ).bind(tenantId, ...accepted).first<{ count: number }>();
-  if (count?.count !== accepted.length) throw new HttpError(500, 'Sync persistence could not be verified.');
+  if (count?.count !== accepted.length) {
+    throw new HttpError(409, 'This inventory exceeds the item limit for the current plan or could not be synchronized.');
+  }
   return json({ success: true, durable: true, syncedCount: actions.length, processedAt: now });
 }
 

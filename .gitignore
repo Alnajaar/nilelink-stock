@@ -3,6 +3,7 @@ build/
 dist/
 dev-dist/
 coverage/
+.wrangler/
 .DS_Store
 *.log
 .env*
