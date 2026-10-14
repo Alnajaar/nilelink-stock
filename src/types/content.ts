@@ -25,6 +25,24 @@ export interface PublicBranchPreview {
   singleBranchDetails: string;
 }
 
+export interface PublicPageLabels {
+  navFeatures: string;
+  navPricing: string;
+  navBranches: string;
+  navHowItWorks: string;
+  ownerSignIn: string;
+  heroSecondaryCta: string;
+  popularPlanBadge: string;
+  branchCalculatorHeadline: string;
+  branchCalculatorDescription: string;
+  branchUnitSingular: string;
+  branchUnitPlural: string;
+  recommendedPlanLabel: string;
+  singleBranchRecommendation: string;
+  multiBranchRecommendation: string;
+  provisionCta: string;
+}
+
 export interface PublicSiteContent {
   brandName: string;
   logoUrl: string;
@@ -47,6 +65,7 @@ export interface PublicSiteContent {
   marketingMetrics: PublicMarketingMetric[];
   multiBranchBenefits: PublicBranchBenefit[];
   branchPreview: PublicBranchPreview;
+  pageLabels: PublicPageLabels;
   footerTagline: string;
   trustBadge: string;
 }
@@ -98,6 +117,23 @@ export const DEFAULT_PUBLIC_SITE_CONTENT: PublicSiteContent = {
     singleBranchNotice: 'Example single-location business (illustrative data):',
     singleBranchName: 'Sample Cafe',
     singleBranchDetails: 'Example plan · 1 location'
+  },
+  pageLabels: {
+    navFeatures: 'Features',
+    navPricing: 'Plans & Pricing',
+    navBranches: 'Multi-Branch Chains',
+    navHowItWorks: 'How it works',
+    ownerSignIn: 'Owner Sign In',
+    heroSecondaryCta: 'Explore features',
+    popularPlanBadge: 'MOST POPULAR FOR BUSY CAFES',
+    branchCalculatorHeadline: 'How many branches do you operate?',
+    branchCalculatorDescription: 'Adjust slider to see your recommended plan and multi-branch configuration.',
+    branchUnitSingular: 'Store',
+    branchUnitPlural: 'Stores',
+    recommendedPlanLabel: 'Recommended Tier',
+    singleBranchRecommendation: 'Single location',
+    multiBranchRecommendation: 'Multi-branch plan',
+    provisionCta: 'Provision'
   },
   footerTagline: 'Multi-Tenant Cafe & Restaurant SaaS',
   trustBadge: 'Cloudflare Edge'

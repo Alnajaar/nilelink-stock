@@ -41,6 +41,24 @@ interface SuperAdminPortalProps {
   onGoToLanding?: () => void;
 }
 
+const editablePageLabels = [
+  ['navFeatures', 'Features navigation'],
+  ['navPricing', 'Pricing navigation'],
+  ['navBranches', 'Branch navigation'],
+  ['navHowItWorks', 'How-it-works navigation'],
+  ['ownerSignIn', 'Owner sign-in button'],
+  ['heroSecondaryCta', 'Secondary hero button'],
+  ['popularPlanBadge', 'Popular plan badge'],
+  ['branchCalculatorHeadline', 'Branch calculator heading'],
+  ['branchCalculatorDescription', 'Branch calculator description'],
+  ['branchUnitSingular', 'Singular branch label'],
+  ['branchUnitPlural', 'Plural branch label'],
+  ['recommendedPlanLabel', 'Recommended plan label'],
+  ['singleBranchRecommendation', 'Single-location recommendation'],
+  ['multiBranchRecommendation', 'Multi-branch recommendation'],
+  ['provisionCta', 'Provision button']
+] as const;
+
 export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
   tenants,
   plans,
@@ -679,6 +697,31 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
                   onChange={event => updateContentField('features', event.target.value.split('\n').slice(0, 20))}
                   className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
               </label>
+            </div>
+          </div>
+          <div className="border-t border-slate-100 pt-4 space-y-4">
+            <h4 className="text-sm font-bold text-slate-900">Navigation and pricing calculator labels</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {editablePageLabels.map(([key, label]) => (
+                <label key={key} className="block text-xs font-semibold text-slate-700">
+                  {label}
+                  {key === 'branchCalculatorDescription' ? (
+                    <textarea value={contentDraft.pageLabels[key]} maxLength={240} rows={2}
+                      onChange={event => updateContentField('pageLabels', {
+                        ...contentDraft.pageLabels,
+                        [key]: event.target.value
+                      })}
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+                  ) : (
+                    <input value={contentDraft.pageLabels[key]} maxLength={key === 'popularPlanBadge' ? 120 : 180}
+                      onChange={event => updateContentField('pageLabels', {
+                        ...contentDraft.pageLabels,
+                        [key]: event.target.value
+                      })}
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+                  )}
+                </label>
+              ))}
             </div>
           </div>
           <div className="border-t border-slate-100 pt-4 space-y-4">

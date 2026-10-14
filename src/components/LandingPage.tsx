@@ -104,15 +104,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
           <nav className="hidden md:flex items-center gap-6 text-xs font-semibold text-slate-300">
             <a href="#features" className="hover:text-amber-400 transition-colors">
-              Features
+              {publicContent.pageLabels.navFeatures}
             </a>
             <a href="#plans" className="hover:text-amber-400 transition-colors">
-              Plans &amp; Pricing
+              {publicContent.pageLabels.navPricing}
             </a>
             <a href="#multibranch" className="hover:text-amber-400 transition-colors">
-              Multi-Branch Chains
+              {publicContent.pageLabels.navBranches}
             </a>
-            <a href="#features" className="hover:text-amber-400 transition-colors">How it works</a>
+            <a href="#features" className="hover:text-amber-400 transition-colors">{publicContent.pageLabels.navHowItWorks}</a>
           </nav>
 
           <div className="flex items-center gap-2.5">
@@ -121,7 +121,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               className="px-3.5 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors flex items-center gap-1.5"
             >
               <Store className="w-3.5 h-3.5 text-amber-400" />
-              <span>Owner Sign In</span>
+              <span>{publicContent.pageLabels.ownerSignIn}</span>
             </button>
             {import.meta.env.DEV && <button
               onClick={() => onLaunchStore(tenants[0])}
@@ -183,7 +183,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               className="w-full sm:w-auto px-6 h-12 rounded-2xl bg-slate-800/90 hover:bg-slate-700/90 text-slate-200 font-semibold text-sm border border-slate-700 transition-colors flex items-center justify-center gap-2"
             >
               <Zap className="w-4 h-4 text-amber-400" />
-              <span>Explore features</span>
+              <span>{publicContent.pageLabels.heroSecondaryCta}</span>
             </a>
           </div>
 
@@ -352,7 +352,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 >
                   {isPopular && (
                     <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-amber-600 text-white text-[11px] font-bold tracking-wide shadow-md">
-                      MOST POPULAR FOR BUSY CAFES
+                      {publicContent.pageLabels.popularPlanBadge}
                     </div>
                   )}
 
@@ -446,10 +446,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               <div>
                 <h4 className="text-base font-bold text-white flex items-center gap-2">
                   <Sliders className="w-4 h-4 text-amber-500" />
-                  <span>How many branches do you operate?</span>
+                  <span>{publicContent.pageLabels.branchCalculatorHeadline}</span>
                 </h4>
                 <p className="text-xs text-slate-400 mt-1">
-                  Adjust slider to see your recommended plan and multi-branch configuration.
+                  {publicContent.pageLabels.branchCalculatorDescription}
                 </p>
               </div>
 
@@ -463,18 +463,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   className="w-36 sm:w-48 accent-amber-500"
                 />
                 <span className="text-lg font-black text-amber-400 font-mono w-14 text-right">
-                  {calcBranches} {calcBranches === 1 ? 'Store' : 'Stores'}
+                  {calcBranches} {calcBranches === 1
+                    ? publicContent.pageLabels.branchUnitSingular
+                    : publicContent.pageLabels.branchUnitPlural}
                 </span>
               </div>
             </div>
 
             <div className="mt-5 pt-4 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
               <span className="text-slate-300">
-                Recommended Tier:{' '}
+                {publicContent.pageLabels.recommendedPlanLabel}:{' '}
                 <strong className="text-amber-400 font-bold">{recommendedPlan.name}</strong> ·{' '}
                 {calcBranches === 1
-                  ? 'Single store isolated database'
-                  : 'Multi-branch central HQ command with branch switching'}
+                  ? publicContent.pageLabels.singleBranchRecommendation
+                  : publicContent.pageLabels.multiBranchRecommendation}
               </span>
 
               <button
@@ -484,7 +486,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 }}
                 className="h-8 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs whitespace-nowrap self-start sm:self-auto transition-colors"
               >
-                Provision for {calcBranches} {calcBranches === 1 ? 'Store' : 'Stores'}
+                {publicContent.pageLabels.provisionCta} {calcBranches} {calcBranches === 1
+                  ? publicContent.pageLabels.branchUnitSingular
+                  : publicContent.pageLabels.branchUnitPlural}
               </button>
             </div>
           </div>

@@ -217,6 +217,8 @@ export class ApiService {
         !content.multiBranchBenefits.every(benefit => benefit && typeof benefit.title === 'string' && typeof benefit.description === 'string') ||
         !content.branchPreview || typeof content.branchPreview !== 'object' ||
         !Object.values(content.branchPreview).every(value => typeof value === 'string') ||
+        !content.pageLabels || typeof content.pageLabels !== 'object' ||
+        !Object.values(content.pageLabels).every(value => typeof value === 'string') ||
         typeof content.footerTagline !== 'string' || typeof content.trustBadge !== 'string') {
       throw new Error('The server returned invalid public website content.');
     }

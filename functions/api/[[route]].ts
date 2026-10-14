@@ -523,6 +523,11 @@ async function updateContent(db: D1Database, request: Request, actor: Authentica
     throw new HttpError(400, 'Invalid multi-branch preview content.');
   }
   const preview = branchPreview as Record<string, unknown>;
+  const pageLabels = content.pageLabels;
+  if (!pageLabels || typeof pageLabels !== 'object' || Array.isArray(pageLabels)) {
+    throw new HttpError(400, 'Invalid public page labels.');
+  }
+  const labels = pageLabels as Record<string, unknown>;
   const clean = {
     brandName: boundedString(content.brandName, 'brand name', 2, 80),
     logoUrl: logoUrl.trim(),
@@ -563,6 +568,23 @@ async function updateContent(db: D1Database, request: Request, actor: Authentica
       singleBranchNotice: boundedString(preview.singleBranchNotice, 'single-branch notice', 2, 180),
       singleBranchName: boundedString(preview.singleBranchName, 'single business name', 2, 180),
       singleBranchDetails: boundedString(preview.singleBranchDetails, 'single business details', 2, 180)
+    },
+    pageLabels: {
+      navFeatures: boundedString(labels.navFeatures, 'features navigation label', 2, 80),
+      navPricing: boundedString(labels.navPricing, 'pricing navigation label', 2, 80),
+      navBranches: boundedString(labels.navBranches, 'branches navigation label', 2, 80),
+      navHowItWorks: boundedString(labels.navHowItWorks, 'how it works navigation label', 2, 80),
+      ownerSignIn: boundedString(labels.ownerSignIn, 'owner sign-in label', 2, 80),
+      heroSecondaryCta: boundedString(labels.heroSecondaryCta, 'secondary hero button label', 2, 80),
+      popularPlanBadge: boundedString(labels.popularPlanBadge, 'popular plan badge', 2, 120),
+      branchCalculatorHeadline: boundedString(labels.branchCalculatorHeadline, 'branch calculator headline', 2, 120),
+      branchCalculatorDescription: boundedString(labels.branchCalculatorDescription, 'branch calculator description', 2, 240),
+      branchUnitSingular: boundedString(labels.branchUnitSingular, 'singular branch unit', 2, 40),
+      branchUnitPlural: boundedString(labels.branchUnitPlural, 'plural branch unit', 2, 40),
+      recommendedPlanLabel: boundedString(labels.recommendedPlanLabel, 'recommended plan label', 2, 80),
+      singleBranchRecommendation: boundedString(labels.singleBranchRecommendation, 'single branch recommendation', 2, 180),
+      multiBranchRecommendation: boundedString(labels.multiBranchRecommendation, 'multi-branch recommendation', 2, 180),
+      provisionCta: boundedString(labels.provisionCta, 'provision button label', 2, 80)
     },
     footerTagline: boundedString(content.footerTagline, 'footer tagline', 2, 160),
     trustBadge: boundedString(content.trustBadge, 'trust badge', 2, 80)

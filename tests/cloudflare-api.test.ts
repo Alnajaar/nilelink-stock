@@ -96,6 +96,7 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
   sqlite.exec(migration);
   sqlite.exec(await import('node:fs').then(fs => fs.readFileSync('migrations/0002_public_site_controls.sql', 'utf8')));
   sqlite.exec(await import('node:fs').then(fs => fs.readFileSync('migrations/0003_editable_landing_details.sql', 'utf8')));
+  sqlite.exec(await import('node:fs').then(fs => fs.readFileSync('migrations/0004_editable_public_page_labels.sql', 'utf8')));
   const migratedContentRow = sqlite.prepare(
     'SELECT published_json FROM site_content WHERE id = ?'
   ).get('landing') as { published_json: string };
@@ -103,6 +104,7 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
   assert.equal(migratedContent.marketingMetrics[0].value, 'Inventory');
   assert.equal(migratedContent.features[1], 'Team time tracking');
   assert.equal(migratedContent.multiBranchHeadline, 'Inventory and workforce tools for hospitality teams.');
+  assert.equal(migratedContent.pageLabels.ownerSignIn, 'Owner Sign In');
 
   const db = new SqliteD1(sqlite);
   const env = {
@@ -547,6 +549,10 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
         branchPreview: {
           ...DEFAULT_PUBLIC_SITE_CONTENT.branchPreview,
           organizationName: 'Updated illustrative organization'
+        },
+        pageLabels: {
+          ...DEFAULT_PUBLIC_SITE_CONTENT.pageLabels,
+          ownerSignIn: 'Business account login'
         }
       }
     }, adminCookie);
@@ -561,6 +567,7 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
         marketingMetrics: { value: string; label: string }[];
         multiBranchBenefits: { title: string; description: string }[];
         branchPreview: { organizationName: string };
+        pageLabels: { ownerSignIn: string };
       };
     };
     assert.equal(published.content.brandName, 'NileLink Stock');
@@ -570,6 +577,7 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
     assert.equal(published.content.marketingMetrics[0].value, 'Tenant-ready');
     assert.equal(published.content.multiBranchBenefits[0].title, 'Custom benefit');
     assert.equal(published.content.branchPreview.organizationName, 'Updated illustrative organization');
+    assert.equal(published.content.pageLabels.ownerSignIn, 'Business account login');
     const invalidLogo = await call('/api/content', 'PUT', {
       publish: true,
       content: { ...DEFAULT_PUBLIC_SITE_CONTENT, logoUrl: 'javascript:alert(1)' }
