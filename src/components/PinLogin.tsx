@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Lock, Coffee, AlertCircle, KeyRound, ShieldCheck, ChevronRight, Store, Building2, Sparkles, Link2 } from 'lucide-react';
+import { Lock, Coffee, AlertCircle, KeyRound, ShieldCheck, ChevronRight, Store, Sparkles, Link2 } from 'lucide-react';
 import { Employee, CafeTenant, LicenseInfo } from '../types/stock';
 import { LicenseManager } from '../services/licenseService';
 
@@ -11,7 +11,6 @@ interface PinLoginProps {
   onVerifyPin: (pin: string) => Promise<{ success: boolean; user?: Employee; message?: string }>;
   onLoginSuccess: (user: Employee) => void;
   onLicenseRenewed: () => void;
-  onOpenSuperAdmin?: () => void;
   onGoToLanding?: () => void;
 }
 
@@ -23,7 +22,6 @@ export const PinLogin: React.FC<PinLoginProps> = ({
   onVerifyPin,
   onLoginSuccess,
   onLicenseRenewed,
-  onOpenSuperAdmin,
   onGoToLanding
 }) => {
   const [pin, setPin] = useState('');
@@ -336,15 +334,6 @@ export const PinLogin: React.FC<PinLoginProps> = ({
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
           <span>NileLink Stock Platform · Cloudflare Edge &amp; Anti-Tamper Core</span>
         </div>
-        {onOpenSuperAdmin && (
-          <button
-            onClick={onOpenSuperAdmin}
-            className="text-[11px] text-amber-400/80 hover:text-amber-400 hover:underline flex items-center gap-1 mt-1 font-semibold"
-          >
-            <Building2 className="w-3.5 h-3.5" />
-            <span>Launch Super Admin SaaS Console</span>
-          </button>
-        )}
       </div>
     </div>
   );

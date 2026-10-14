@@ -324,13 +324,6 @@ export default function App() {
     showToast('Signed out of terminal.', 'ok');
   };
 
-  // Launch Super Admin directly
-  const handleOpenSuperAdmin = () => {
-    setCurrentUser(null);
-    setAppMode('superadmin');
-    setCurrentTab('superadmin');
-  };
-
   const handleSuperAdminLogin = async (email: string, password: string, totp: string) => {
     const user = await ApiService.signIn(email, password, totp);
     if (user.role !== 'platform_admin') {
@@ -740,7 +733,6 @@ export default function App() {
           onVerifyPin={handleVerifyPin}
           onLoginSuccess={handleLoginSuccess}
           onLicenseRenewed={refreshLicense}
-          onOpenSuperAdmin={handleOpenSuperAdmin}
           onGoToLanding={() => setAppMode('landing')}
         />
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
