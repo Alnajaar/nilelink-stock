@@ -13,6 +13,8 @@ npm run dev
 
 The local Express server starts on port `3000` by default. Set `PORT` to use a different port.
 
+GitHub Actions runs the API/security tests, TypeScript check, and production build on pushes and pull requests. CI does not deploy to Cloudflare or replace authenticated staging and release checks.
+
 ## Available scripts
 
 | Command | Description |
