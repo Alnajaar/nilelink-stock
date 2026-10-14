@@ -122,6 +122,7 @@ export interface SubscriptionPlan {
   id: string;
   name: string;
   price: number;
+  currency?: string;
   billingPeriod: 'monthly' | 'quarterly' | 'annual' | 'lifetime';
   maxTerminals: number;
   maxItems: number;

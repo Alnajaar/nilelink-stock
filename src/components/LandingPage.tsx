@@ -47,7 +47,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onOwnerLogin,
   onNewTenantRegistered
 }) => {
-  const [billingPeriod, setBillingPeriod] = useState<'monthly' | 'annual'>('monthly');
   const [calcBranches, setCalcBranches] = useState<number>(1);
   const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [selectedPlanId, setSelectedPlanId] = useState<string>('plan-pro');
@@ -324,36 +323,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               {publicContent.pricingDescription}
             </p>
 
-            {/* Billing cycle switcher */}
-            <div className="mt-6 inline-flex items-center p-1 rounded-xl bg-slate-900 border border-slate-800">
-              <button
-                onClick={() => setBillingPeriod('monthly')}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  billingPeriod === 'monthly' ? 'bg-amber-600 text-white shadow-xs' : 'text-slate-400'
-                }`}
-              >
-                Monthly Billing
-              </button>
-              <button
-                onClick={() => setBillingPeriod('annual')}
-                className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-                  billingPeriod === 'annual' ? 'bg-amber-600 text-white shadow-xs' : 'text-slate-400'
-                }`}
-              >
-                <span>Annual Billing</span>
-                <span className="text-[10px] bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded-full font-bold">
-                  2 Mo Free
-                </span>
-              </button>
-            </div>
           </div>
 
           {/* Pricing Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto items-stretch">
             {plans.slice(0, 3).map((plan, idx) => {
               const isPopular = plan.popular || idx === 1;
-              const displayPrice =
-                billingPeriod === 'annual' ? Math.round(plan.price * 0.83) : plan.price;
+              const displayPrice = new Intl.NumberFormat(undefined, {
+                style: 'currency',
+                currency: plan.currency || 'USD',
+                maximumFractionDigits: 2
+              }).format(plan.price);
+              const periodLabel = {
+                monthly: 'per month',
+                quarterly: 'per quarter',
+                annual: 'per year',
+                lifetime: 'one-time'
+              }[plan.billingPeriod];
 
               return (
                 <div
@@ -386,15 +372,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                     <div className="my-6 pb-6 border-b border-slate-800">
                       <div className="flex items-baseline gap-1">
                         <span className="text-4xl sm:text-5xl font-black text-white">
-                          ${displayPrice}
+                          {displayPrice}
                         </span>
-                        <span className="text-xs text-slate-400 font-medium">/month</span>
+                        <span className="text-xs text-slate-400 font-medium">{periodLabel}</span>
                       </div>
-                      {billingPeriod === 'annual' && (
-                        <span className="text-[11px] text-emerald-400 font-semibold block mt-1">
-                          Billed annually · Save ${(plan.price * 2.4).toFixed(0)}/yr
-                        </span>
-                      )}
                     </div>
 
                     {/* Limits Specs */}
