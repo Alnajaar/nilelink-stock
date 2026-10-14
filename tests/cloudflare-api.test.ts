@@ -95,6 +95,14 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
   const migration = await import('node:fs').then(fs => fs.readFileSync('migrations/0001_core.sql', 'utf8'));
   sqlite.exec(migration);
   sqlite.exec(await import('node:fs').then(fs => fs.readFileSync('migrations/0002_public_site_controls.sql', 'utf8')));
+  sqlite.exec(await import('node:fs').then(fs => fs.readFileSync('migrations/0003_editable_landing_details.sql', 'utf8')));
+  const migratedContentRow = sqlite.prepare(
+    'SELECT published_json FROM site_content WHERE id = ?'
+  ).get('landing') as { published_json: string };
+  const migratedContent = JSON.parse(migratedContentRow.published_json) as typeof DEFAULT_PUBLIC_SITE_CONTENT;
+  assert.equal(migratedContent.marketingMetrics[0].value, 'Inventory');
+  assert.equal(migratedContent.features[1], 'Team time tracking');
+  assert.equal(migratedContent.multiBranchHeadline, 'Inventory and workforce tools for hospitality teams.');
 
   const db = new SqliteD1(sqlite);
   const env = {
@@ -488,23 +496,48 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
         brandName: 'NileLink Stock',
         logoUrl: 'https://assets.example.com/logo.png',
         headline: 'A new public headline',
-        pricingHeadline: 'Plans that fit your business'
+        pricingHeadline: 'Plans that fit your business',
+        marketingMetrics: [{ value: 'Tenant-ready', label: 'Content controlled by the owner' }],
+        multiBranchBenefits: [{ title: 'Custom benefit', description: 'Updated by the platform administrator.' }],
+        branchPreview: {
+          ...DEFAULT_PUBLIC_SITE_CONTENT.branchPreview,
+          organizationName: 'Updated illustrative organization'
+        }
       }
     }, adminCookie);
     assert.equal(contentUpdate.status, 200);
     const publicContent = await call('/api/content');
     const published = await publicContent.json() as {
-      content: { brandName: string; logoUrl: string; headline: string; pricingHeadline: string };
+      content: {
+        brandName: string;
+        logoUrl: string;
+        headline: string;
+        pricingHeadline: string;
+        marketingMetrics: { value: string; label: string }[];
+        multiBranchBenefits: { title: string; description: string }[];
+        branchPreview: { organizationName: string };
+      };
     };
     assert.equal(published.content.brandName, 'NileLink Stock');
     assert.equal(published.content.logoUrl, 'https://assets.example.com/logo.png');
     assert.equal(published.content.headline, 'A new public headline');
     assert.equal(published.content.pricingHeadline, 'Plans that fit your business');
+    assert.equal(published.content.marketingMetrics[0].value, 'Tenant-ready');
+    assert.equal(published.content.multiBranchBenefits[0].title, 'Custom benefit');
+    assert.equal(published.content.branchPreview.organizationName, 'Updated illustrative organization');
     const invalidLogo = await call('/api/content', 'PUT', {
       publish: true,
       content: { ...DEFAULT_PUBLIC_SITE_CONTENT, logoUrl: 'javascript:alert(1)' }
     }, adminCookie);
     assert.equal(invalidLogo.status, 400);
+    const invalidMetric = await call('/api/content', 'PUT', {
+      publish: true,
+      content: {
+        ...DEFAULT_PUBLIC_SITE_CONTENT,
+        marketingMetrics: [{ value: 'x'.repeat(41), label: 'Invalid metric' }]
+      }
+    }, adminCookie);
+    assert.equal(invalidMetric.status, 400);
     const unauthenticatedContentUpdate = await call('/api/content', 'PUT', {
       publish: true,
       content: DEFAULT_PUBLIC_SITE_CONTENT

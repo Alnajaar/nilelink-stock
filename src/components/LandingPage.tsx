@@ -58,8 +58,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
 
   // Quick Demo Launcher with exact roles
   const handleLaunchDemoRole = (role: UserRole, targetTenantId?: string) => {
+    if (!import.meta.env.DEV) return;
+
     const targetTenant =
       (targetTenantId && tenants.find(t => t.id === targetTenantId)) || tenants[0];
+    if (!targetTenant) return;
 
     let user: Employee = {
       id: 'demo-user-' + role,
@@ -185,25 +188,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({
             </a>
           </div>
 
-          {/* Live Telemetry KPI Strip */}
-          <div className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 max-w-4xl mx-auto">
-            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800/80 text-left">
-              <span className="text-2xl font-black text-amber-400 block tracking-tight">0.8s</span>
-              <span className="text-[11px] font-medium text-slate-400">Barista Touch Checkout</span>
+          {publicContent.marketingMetrics.length > 0 && (
+            <div className="mt-12 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 max-w-4xl mx-auto">
+              {publicContent.marketingMetrics.map((metric, index) => (
+                <div key={`${metric.label}-${index}`} className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800/80 text-left">
+                  <span className={`text-2xl font-black block tracking-tight ${index === 1 ? 'text-emerald-400' : index === 3 ? 'text-white' : 'text-amber-400'}`}>
+                    {metric.value}
+                  </span>
+                  <span className="text-[11px] font-medium text-slate-400">{metric.label}</span>
+                </div>
+              ))}
             </div>
-            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800/80 text-left">
-              <span className="text-2xl font-black text-emerald-400 block tracking-tight">100%</span>
-              <span className="text-[11px] font-medium text-slate-400">Offline Basement Ready</span>
-            </div>
-            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800/80 text-left">
-              <span className="text-2xl font-black text-amber-400 block tracking-tight">+$1,450</span>
-              <span className="text-[11px] font-medium text-slate-400">Avg Monthly Loss Saved</span>
-            </div>
-            <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800/80 text-left">
-              <span className="text-2xl font-black text-white block tracking-tight">Multi-HQ</span>
-              <span className="text-[11px] font-medium text-slate-400">1 to 20+ Branch Sync</span>
-            </div>
-          </div>
+          )}
         </div>
       </section>
 
@@ -531,35 +527,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </p>
 
               <div className="mt-6 space-y-3.5 text-xs text-slate-300">
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-                    <Check className="w-3.5 h-3.5" />
+                {publicContent.multiBranchBenefits.map((benefit, index) => (
+                  <div key={`${benefit.title}-${index}`} className="flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
+                      <Check className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <strong className="text-white block font-semibold">{benefit.title}:</strong>
+                      {benefit.description}
+                    </div>
                   </div>
-                  <div>
-                    <strong className="text-white block font-semibold">Strict Client Isolation:</strong>
-                    Individual cafes cannot see or access any other business on your platform.
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-                    <Check className="w-3.5 h-3.5" />
-                  </div>
-                  <div>
-                    <strong className="text-white block font-semibold">HQ Consolidated Analytics:</strong>
-                    Owners of chains view consolidated consumption, spoilage waste, and shrinkage.
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 mt-0.5">
-                    <Check className="w-3.5 h-3.5" />
-                  </div>
-                  <div>
-                    <strong className="text-white block font-semibold">Super Admin Expiry Control:</strong>
-                    You (as SaaS Super Admin) can instantly extend, renew, or suspend licenses remotely.
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
 
@@ -571,11 +549,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <div className="w-3 h-3 rounded-full bg-amber-500/80" />
                   <div className="w-3 h-3 rounded-full bg-emerald-500/80" />
                   <span className="text-[11px] font-mono text-slate-400 ml-2">
-                    Nile Roastery Organization Group
+                    {publicContent.branchPreview.organizationName}
                   </span>
                 </div>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold">
-                  2 ACTIVE BRANCHES
+                  {publicContent.branchPreview.activeBranchesLabel}
                 </span>
               </div>
 
@@ -584,53 +562,53 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   <div className="flex items-center gap-3">
                     <Store className="w-5 h-5 text-amber-400" />
                     <div>
-                      <p className="font-bold text-white text-xs">Demo Specialty Roastery · Flagship</p>
-                      <p className="text-[10px] text-slate-400">142 Items · 8 Staff PINs · Live Sync</p>
+                      <p className="font-bold text-white text-xs">{publicContent.branchPreview.flagshipName}</p>
+                      <p className="text-[10px] text-slate-400">{publicContent.branchPreview.flagshipDetails}</p>
                     </div>
                   </div>
-                  <button
+                  {import.meta.env.DEV && <button
                     onClick={() => handleLaunchDemoRole('admin', 'nile-flagship')}
                     className="px-3 h-7 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-[11px] rounded-lg transition-colors"
                   >
                     Switch In
-                  </button>
+                  </button>}
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-slate-800/80 border border-slate-700/60 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <Store className="w-5 h-5 text-slate-400" />
                     <div>
-                      <p className="font-bold text-white text-xs">Nile Bistro &amp; Coffee · Branch 2</p>
-                      <p className="text-[10px] text-slate-400">118 Items · 5 Staff PINs · Live Sync</p>
+                      <p className="font-bold text-white text-xs">{publicContent.branchPreview.secondBranchName}</p>
+                      <p className="text-[10px] text-slate-400">{publicContent.branchPreview.secondBranchDetails}</p>
                     </div>
                   </div>
-                  <button
+                  {import.meta.env.DEV && <button
                     onClick={() => handleLaunchDemoRole('admin', 'nile-branch-01')}
                     className="px-3 h-7 bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold text-[11px] rounded-lg transition-colors"
                   >
                     Switch In
-                  </button>
+                  </button>}
                 </div>
 
                 {/* Single Store Client Separator */}
                 <div className="pt-2 text-[11px] text-slate-500">
-                  <span>Isolated Single Store Client (Cannot see above branches):</span>
+                  <span>{publicContent.branchPreview.singleBranchNotice}</span>
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-between opacity-80">
                   <div className="flex items-center gap-3">
                     <Store className="w-5 h-5 text-slate-500" />
                     <div>
-                      <p className="font-bold text-slate-300 text-xs">Example Artisan Espresso</p>
-                      <p className="text-[10px] text-slate-500">Single Espresso Solo Plan · 1 Branch</p>
+                      <p className="font-bold text-slate-300 text-xs">{publicContent.branchPreview.singleBranchName}</p>
+                      <p className="text-[10px] text-slate-500">{publicContent.branchPreview.singleBranchDetails}</p>
                     </div>
                   </div>
-                  <button
+                  {import.meta.env.DEV && <button
                     onClick={() => handleLaunchDemoRole('admin', 'artisan-single-01')}
                     className="px-3 h-7 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-[11px] rounded-lg transition-colors"
                   >
                     Switch In
-                  </button>
+                  </button>}
                 </div>
               </div>
             </div>

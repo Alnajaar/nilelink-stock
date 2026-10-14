@@ -754,6 +754,100 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-100 pt-4">
+            <div className="md:col-span-2 space-y-3">
+              <h4 className="text-sm font-bold text-slate-900">Home page metrics</h4>
+              {contentDraft.marketingMetrics.map((metric, index) => (
+                <div key={index} className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-xl border border-slate-200 p-3">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Metric value
+                    <input value={metric.value} maxLength={40}
+                      onChange={event => updateContentField('marketingMetrics', contentDraft.marketingMetrics.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, value: event.target.value } : item))}
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Metric label
+                    <input value={metric.label} maxLength={120}
+                      onChange={event => updateContentField('marketingMetrics', contentDraft.marketingMetrics.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, label: event.target.value } : item))}
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+                  </label>
+                  <div className="md:col-span-2 flex justify-end">
+                    <button type="button"
+                      onClick={() => updateContentField('marketingMetrics', contentDraft.marketingMetrics.filter((_, itemIndex) => itemIndex !== index))}
+                      className="text-xs text-red-600 hover:text-red-800 font-semibold flex items-center gap-1">
+                      <Trash2 className="w-3 h-3" /> Remove metric
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <button type="button" disabled={contentDraft.marketingMetrics.length >= 6}
+                onClick={() => updateContentField('marketingMetrics', [...contentDraft.marketingMetrics, { value: '', label: '' }])}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40 flex items-center gap-1">
+                <Plus className="w-3.5 h-3.5" /> Add metric
+              </button>
+            </div>
+            <div className="md:col-span-2 space-y-3 border-t border-slate-100 pt-4">
+              <h4 className="text-sm font-bold text-slate-900">Multi-branch benefits</h4>
+              {contentDraft.multiBranchBenefits.map((benefit, index) => (
+                <div key={index} className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-xl border border-slate-200 p-3">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Benefit title
+                    <input value={benefit.title} maxLength={120}
+                      onChange={event => updateContentField('multiBranchBenefits', contentDraft.multiBranchBenefits.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, title: event.target.value } : item))}
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+                  </label>
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Benefit description
+                    <textarea value={benefit.description} maxLength={500} rows={2}
+                      onChange={event => updateContentField('multiBranchBenefits', contentDraft.multiBranchBenefits.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, description: event.target.value } : item))}
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" />
+                  </label>
+                  <div className="md:col-span-2 flex justify-end">
+                    <button type="button"
+                      onClick={() => updateContentField('multiBranchBenefits', contentDraft.multiBranchBenefits.filter((_, itemIndex) => itemIndex !== index))}
+                      className="text-xs text-red-600 hover:text-red-800 font-semibold flex items-center gap-1">
+                      <Trash2 className="w-3 h-3" /> Remove benefit
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <button type="button" disabled={contentDraft.multiBranchBenefits.length >= 8}
+                onClick={() => updateContentField('multiBranchBenefits', [...contentDraft.multiBranchBenefits, { title: '', description: '' }])}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-40 flex items-center gap-1">
+                <Plus className="w-3.5 h-3.5" /> Add benefit
+              </button>
+            </div>
+            <div className="md:col-span-2 space-y-3 border-t border-slate-100 pt-4">
+              <h4 className="text-sm font-bold text-slate-900">Multi-branch preview card</h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {([
+                  ['organizationName', 'Organization name'],
+                  ['activeBranchesLabel', 'Active branches label'],
+                  ['flagshipName', 'Flagship branch name'],
+                  ['flagshipDetails', 'Flagship branch details'],
+                  ['secondBranchName', 'Second branch name'],
+                  ['secondBranchDetails', 'Second branch details'],
+                  ['singleBranchNotice', 'Single-branch notice'],
+                  ['singleBranchName', 'Single business name'],
+                  ['singleBranchDetails', 'Single business details']
+                ] as const).map(([key, label]) => (
+                  <label key={key} className="block text-xs font-semibold text-slate-700">
+                    {label}
+                    <input value={contentDraft.branchPreview[key]} maxLength={180}
+                      onChange={event => updateContentField('branchPreview', {
+                        ...contentDraft.branchPreview,
+                        [key]: event.target.value
+                      })}
+                      className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm" />
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-100 pt-4">
             <label className="block text-xs font-semibold text-slate-700">
               Footer brand tagline
               <input value={contentDraft.footerTagline} maxLength={160} onChange={event => updateContentField('footerTagline', event.target.value)}

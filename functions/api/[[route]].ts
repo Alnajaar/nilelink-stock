@@ -484,6 +484,35 @@ async function updateContent(db: D1Database, request: Request, actor: Authentica
   )) {
     throw new HttpError(400, 'Invalid public feature cards.');
   }
+  const marketingMetrics = content.marketingMetrics;
+  if (!Array.isArray(marketingMetrics) || marketingMetrics.length > 6 || marketingMetrics.some(metric =>
+    !metric || typeof metric !== 'object' || Array.isArray(metric) ||
+    typeof (metric as Record<string, unknown>).value !== 'string' ||
+    typeof (metric as Record<string, unknown>).label !== 'string' ||
+    ((metric as Record<string, string>).value).trim().length < 1 ||
+    ((metric as Record<string, string>).value).trim().length > 40 ||
+    ((metric as Record<string, string>).label).trim().length < 2 ||
+    ((metric as Record<string, string>).label).trim().length > 120
+  )) {
+    throw new HttpError(400, 'Invalid public marketing metrics.');
+  }
+  const multiBranchBenefits = content.multiBranchBenefits;
+  if (!Array.isArray(multiBranchBenefits) || multiBranchBenefits.length > 8 || multiBranchBenefits.some(benefit =>
+    !benefit || typeof benefit !== 'object' || Array.isArray(benefit) ||
+    typeof (benefit as Record<string, unknown>).title !== 'string' ||
+    typeof (benefit as Record<string, unknown>).description !== 'string' ||
+    ((benefit as Record<string, string>).title).trim().length < 2 ||
+    ((benefit as Record<string, string>).title).trim().length > 120 ||
+    ((benefit as Record<string, string>).description).trim().length < 2 ||
+    ((benefit as Record<string, string>).description).trim().length > 500
+  )) {
+    throw new HttpError(400, 'Invalid multi-branch benefits.');
+  }
+  const branchPreview = content.branchPreview;
+  if (!branchPreview || typeof branchPreview !== 'object' || Array.isArray(branchPreview)) {
+    throw new HttpError(400, 'Invalid multi-branch preview content.');
+  }
+  const preview = branchPreview as Record<string, unknown>;
   const clean = {
     brandName: boundedString(content.brandName, 'brand name', 2, 80),
     logoUrl: logoUrl.trim(),
@@ -506,6 +535,25 @@ async function updateContent(db: D1Database, request: Request, actor: Authentica
       title: (card as Record<string, string>).title.trim(),
       description: (card as Record<string, string>).description.trim()
     })),
+    marketingMetrics: marketingMetrics.map(metric => ({
+      value: boundedString((metric as Record<string, unknown>).value, 'metric value', 1, 40),
+      label: boundedString((metric as Record<string, unknown>).label, 'metric label', 2, 120)
+    })),
+    multiBranchBenefits: multiBranchBenefits.map(benefit => ({
+      title: boundedString((benefit as Record<string, unknown>).title, 'benefit title', 2, 120),
+      description: boundedString((benefit as Record<string, unknown>).description, 'benefit description', 2, 500)
+    })),
+    branchPreview: {
+      organizationName: boundedString(preview.organizationName, 'organization name', 2, 180),
+      activeBranchesLabel: boundedString(preview.activeBranchesLabel, 'active branches label', 2, 180),
+      flagshipName: boundedString(preview.flagshipName, 'flagship branch name', 2, 180),
+      flagshipDetails: boundedString(preview.flagshipDetails, 'flagship branch details', 2, 180),
+      secondBranchName: boundedString(preview.secondBranchName, 'second branch name', 2, 180),
+      secondBranchDetails: boundedString(preview.secondBranchDetails, 'second branch details', 2, 180),
+      singleBranchNotice: boundedString(preview.singleBranchNotice, 'single-branch notice', 2, 180),
+      singleBranchName: boundedString(preview.singleBranchName, 'single business name', 2, 180),
+      singleBranchDetails: boundedString(preview.singleBranchDetails, 'single business details', 2, 180)
+    },
     footerTagline: boundedString(content.footerTagline, 'footer tagline', 2, 160),
     trustBadge: boundedString(content.trustBadge, 'trust badge', 2, 80)
   };

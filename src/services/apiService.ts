@@ -202,6 +202,12 @@ export class ApiService {
         typeof content.featuresHeadline !== 'string' || typeof content.featuresDescription !== 'string' ||
         !Array.isArray(content.featureCards) ||
         !content.featureCards.every(card => card && typeof card.title === 'string' && typeof card.description === 'string') ||
+        !Array.isArray(content.marketingMetrics) ||
+        !content.marketingMetrics.every(metric => metric && typeof metric.value === 'string' && typeof metric.label === 'string') ||
+        !Array.isArray(content.multiBranchBenefits) ||
+        !content.multiBranchBenefits.every(benefit => benefit && typeof benefit.title === 'string' && typeof benefit.description === 'string') ||
+        !content.branchPreview || typeof content.branchPreview !== 'object' ||
+        !Object.values(content.branchPreview).every(value => typeof value === 'string') ||
         typeof content.footerTagline !== 'string' || typeof content.trustBadge !== 'string') {
       throw new Error('The server returned invalid public website content.');
     }
@@ -252,28 +258,7 @@ export class ApiService {
     return data.plan;
   }
 
-  public static async savePublicContent(content: {
-    brandName: string;
-    logoUrl: string;
-    tagline: string;
-    heroEyebrow: string;
-    headline: string;
-    description: string;
-    features: string[];
-    primaryCta: string;
-    pricingEyebrow: string;
-    pricingHeadline: string;
-    pricingDescription: string;
-    multiBranchEyebrow: string;
-    multiBranchHeadline: string;
-    multiBranchDescription: string;
-    featuresEyebrow: string;
-    featuresHeadline: string;
-    featuresDescription: string;
-    featureCards: PublicSiteContent['featureCards'];
-    footerTagline: string;
-    trustBadge: string;
-  }, publish: boolean): Promise<void> {
+  public static async savePublicContent(content: PublicSiteContent, publish: boolean): Promise<void> {
     const response = await fetch(`${this.baseUrl}/content`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
