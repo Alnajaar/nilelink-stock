@@ -765,6 +765,14 @@ async function persistSyncOperations(
   user: AuthenticatedUser,
   actions: unknown[]
 ): Promise<Response> {
+  const allowedRoles: Record<string, AuthenticatedUser['role'][]> = {
+    STOCK_OUT: ['platform_admin', 'owner', 'admin', 'manager', 'teamlead', 'staff'],
+    STOCK_COUNT: ['platform_admin', 'owner', 'admin', 'manager', 'teamlead', 'staff'],
+    STOCK_IN: ['platform_admin', 'owner', 'admin', 'manager', 'teamlead'],
+    WASTE: ['platform_admin', 'owner', 'admin', 'manager', 'teamlead'],
+    UPDATE_ITEM: ['platform_admin', 'owner', 'admin', 'manager'],
+    ADD_ITEM: ['platform_admin', 'owner', 'admin', 'manager']
+  };
   const now = new Date().toISOString();
   const accepted: string[] = [];
   const seen = new Set<string>();
@@ -781,6 +789,9 @@ async function persistSyncOperations(
       throw new HttpError(400, 'Invalid sync operation.');
     }
     const operationId = action.id;
+    if (!allowedRoles[action.actionType].includes(user.role)) {
+      throw new HttpError(403, 'Your role is not allowed to perform this inventory operation.');
+    }
     if (seen.has(operationId)) continue;
     seen.add(operationId);
     const payloadJson = JSON.stringify(action.payload);

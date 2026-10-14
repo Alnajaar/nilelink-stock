@@ -393,6 +393,36 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
     }, managerCookie);
     assert.equal(managerCompensationUpdate.status, 403);
 
+    const staffCreate = await call('/api/workforce/employees', 'POST', {
+      tenantId: registrationData.tenant.id,
+      name: 'Staff User',
+      role: 'staff',
+      pin: '987654',
+      payType: 'hourly',
+      payRateMinor: 1500,
+      payPeriod: 'monthly',
+      currency: 'USD'
+    }, cookie);
+    assert.equal(staffCreate.status, 201);
+    const staffLogin = await call('/api/auth/pin', 'POST', {
+      tenantId: registrationData.tenant.id,
+      pin: '987654'
+    });
+    assert.equal(staffLogin.status, 200);
+    const staffCookie = staffLogin.headers.get('set-cookie')?.split(';')[0];
+    assert.ok(staffCookie);
+    for (const actionType of ['UPDATE_ITEM', 'ADD_ITEM']) {
+      const catalogMutation = await call('/api/sync', 'POST', {
+        cafeId: registrationData.tenant.id,
+        actions: [{
+          id: `staff-catalog-${actionType.toLowerCase()}`,
+          actionType,
+          payload: { item: {} }
+        }]
+      }, staffCookie);
+      assert.equal(catalogMutation.status, 403);
+    }
+
     const pinLogin = await call('/api/auth/pin', 'POST', {
       tenantId: registrationData.tenant.id,
       pin: '123456'
