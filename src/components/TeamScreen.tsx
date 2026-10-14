@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Users, UserPlus, KeyRound, Check, X, Trash2, Shield, Coffee } from 'lucide-react';
+import { Users, UserPlus, Trash2, Shield, Coffee, Pencil, Check, X } from 'lucide-react';
 import { Employee, UserRole } from '../types/stock';
+
+type PayPeriod = 'weekly' | 'biweekly' | 'semimonthly' | 'monthly' | 'annual';
 
 interface TeamScreenProps {
   employees: Employee[];
@@ -8,7 +10,13 @@ interface TeamScreenProps {
   onAddEmployee: (name: string, pin: string, role: Exclude<UserRole, 'admin' | 'superadmin'>, compensation: {
     payType: 'hourly' | 'salary';
     payRateMinor: number;
-    payPeriod: 'weekly' | 'biweekly' | 'semimonthly' | 'monthly' | 'annual';
+    payPeriod: PayPeriod;
+    currency: string;
+  }) => Promise<void>;
+  onUpdateCompensation: (id: string, compensation: {
+    payType: 'hourly' | 'salary';
+    payRateMinor: number;
+    payPeriod: PayPeriod;
     currency: string;
   }) => Promise<void>;
   onToggleActive: (id: string, active: boolean) => Promise<void>;
@@ -19,6 +27,7 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
   employees,
   currency,
   onAddEmployee,
+  onUpdateCompensation,
   onToggleActive,
   onDeleteEmployee
 }) => {
@@ -28,7 +37,11 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
   const [isAdding, setIsAdding] = useState(false);
   const [payType, setPayType] = useState<'hourly' | 'salary'>('hourly');
   const [payRate, setPayRate] = useState('');
-  const [payPeriod, setPayPeriod] = useState<'weekly' | 'biweekly' | 'semimonthly' | 'monthly' | 'annual'>('monthly');
+  const [payPeriod, setPayPeriod] = useState<PayPeriod>('monthly');
+  const [editingCompensationId, setEditingCompensationId] = useState<string | null>(null);
+  const [editPayType, setEditPayType] = useState<'hourly' | 'salary'>('hourly');
+  const [editPayRate, setEditPayRate] = useState('');
+  const [editPayPeriod, setEditPayPeriod] = useState<PayPeriod>('monthly');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -65,6 +78,38 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
     setPayType('hourly');
     setPayRate('');
     setIsAdding(false);
+  };
+
+  const startCompensationEdit = (employee: Employee) => {
+    setError('');
+    setEditingCompensationId(employee.id);
+    setEditPayType(employee.payType || 'hourly');
+    setEditPayRate(String((employee.payRateMinor || 0) / 100));
+    setEditPayPeriod(employee.payPeriod || 'monthly');
+  };
+
+  const saveCompensation = async (event: React.FormEvent, employeeId: string) => {
+    event.preventDefault();
+    const amount = Number(editPayRate);
+    if (!Number.isFinite(amount) || amount < 0) {
+      setError('Enter a valid non-negative compensation amount.');
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    try {
+      await onUpdateCompensation(employeeId, {
+        payType: editPayType,
+        payRateMinor: Math.round(amount * 100),
+        payPeriod: editPayPeriod,
+        currency
+      });
+      setEditingCompensationId(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not update compensation.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -190,8 +235,9 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
           return (
             <div
               key={emp.id}
-              className="p-4 flex items-center justify-between gap-3 hover:bg-slate-50/60 transition-colors"
+              className="p-4 hover:bg-slate-50/60 transition-colors"
             >
+              <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div
                   className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs ${
@@ -245,6 +291,16 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
               {!isAdmin && (
                 <div className="flex items-center gap-2 shrink-0">
                   <button
+                    onClick={() => editingCompensationId === emp.id
+                      ? setEditingCompensationId(null)
+                      : startCompensationEdit(emp)}
+                    className="w-8 h-8 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-700 flex items-center justify-center transition-colors"
+                    title="Edit compensation"
+                    aria-label={`Edit ${emp.name} compensation`}
+                  >
+                    {editingCompensationId === emp.id ? <X className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
                     onClick={() => onToggleActive(emp.id, !emp.active)}
                     className={`h-8 px-3 rounded-lg text-xs font-semibold transition-colors ${
                       emp.active
@@ -263,6 +319,42 @@ export const TeamScreen: React.FC<TeamScreenProps> = ({
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
+              )}
+              </div>
+              {editingCompensationId === emp.id && (
+                <form onSubmit={event => void saveCompensation(event, emp.id)}
+                  className="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-amber-200 bg-amber-50/60 p-3 sm:grid-cols-4">
+                  <label className="text-xs font-semibold text-slate-700">
+                    Compensation type
+                    <select value={editPayType} onChange={event => setEditPayType(event.target.value as 'hourly' | 'salary')}
+                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2">
+                      <option value="hourly">Hourly</option>
+                      <option value="salary">Salary</option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700">
+                    {editPayType === 'hourly' ? `Hourly rate (${currency})` : `Gross salary (${currency})`}
+                    <input type="number" min="0" step="0.01" required value={editPayRate}
+                      onChange={event => setEditPayRate(event.target.value)}
+                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700">
+                    Pay period
+                    <select value={editPayPeriod} onChange={event => setEditPayPeriod(event.target.value as PayPeriod)}
+                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2">
+                      <option value="weekly">Weekly</option>
+                      <option value="biweekly">Biweekly</option>
+                      <option value="semimonthly">Semimonthly</option>
+                      <option value="monthly">Monthly</option>
+                      <option value="annual">Annual</option>
+                    </select>
+                  </label>
+                  <button type="submit" disabled={submitting}
+                    className="self-end rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                    <Check className="mr-1 inline h-3.5 w-3.5" /> Save
+                  </button>
+                  {error && <p role="alert" className="text-xs text-red-600 sm:col-span-4">{error}</p>}
+                </form>
               )}
             </div>
           );

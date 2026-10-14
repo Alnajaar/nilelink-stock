@@ -55,7 +55,14 @@ export class ApiService {
   public static async updateEmployee(
     tenantId: string,
     employeeId: string,
-    updates: { name?: string; active?: boolean; payType?: 'hourly' | 'salary'; payRateMinor?: number; payPeriod?: string; currency?: string }
+    updates: {
+      name?: string;
+      active?: boolean;
+      payType?: 'hourly' | 'salary';
+      payRateMinor?: number;
+      payPeriod?: 'weekly' | 'biweekly' | 'semimonthly' | 'monthly' | 'annual';
+      currency?: string;
+    }
   ): Promise<void> {
     const response = await fetch(`${this.baseUrl}/workforce/employees/${encodeURIComponent(employeeId)}`, {
       method: 'PATCH',

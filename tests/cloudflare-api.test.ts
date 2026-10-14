@@ -351,6 +351,7 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
       currency: 'USD'
     }, cookie);
     assert.equal(employeeCreate.status, 201);
+    const createdEmployee = await employeeCreate.json() as { employee: { id: string } };
     const managerLogin = await call('/api/auth/pin', 'POST', {
       tenantId: registrationData.tenant.id,
       pin: '789012'
@@ -368,6 +369,28 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
     assert.equal(managerRoster.status, 200);
     assert.equal(roster.employees.length, 2);
     assert.equal('payRateMinor' in roster.employees.find(employee => employee.name === 'Manager User')!, false);
+
+    const compensationUpdate = await call(`/api/workforce/employees/${createdEmployee.employee.id}`, 'PATCH', {
+      tenantId: registrationData.tenant.id,
+      payRateMinor: 500000,
+      payPeriod: 'semimonthly'
+    }, cookie);
+    assert.equal(compensationUpdate.status, 200);
+    const updatedEmployees = await call(
+      `/api/workforce/employees?tenantId=${registrationData.tenant.id}`,
+      'GET',
+      undefined,
+      cookie
+    );
+    const updatedRoster = await updatedEmployees.json() as { employees: Array<Record<string, unknown>> };
+    const updatedEmployee = updatedRoster.employees.find(employee => employee.id === createdEmployee.employee.id)!;
+    assert.equal(updatedEmployee.payRateMinor, 500000);
+    assert.equal(updatedEmployee.payPeriod, 'semimonthly');
+    const managerCompensationUpdate = await call(`/api/workforce/employees/${createdEmployee.employee.id}`, 'PATCH', {
+      tenantId: registrationData.tenant.id,
+      payRateMinor: 1
+    }, managerCookie);
+    assert.equal(managerCompensationUpdate.status, 403);
 
     const pinLogin = await call('/api/auth/pin', 'POST', {
       tenantId: registrationData.tenant.id,

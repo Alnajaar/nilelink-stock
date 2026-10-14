@@ -546,6 +546,27 @@ export default function App() {
     showToast('Employee status updated.', 'ok');
   };
 
+  const handleUpdateCompensation = async (
+    id: string,
+    compensation: {
+      payType: 'hourly' | 'salary';
+      payRateMinor: number;
+      payPeriod: 'weekly' | 'biweekly' | 'semimonthly' | 'monthly' | 'annual';
+      currency: string;
+    }
+  ) => {
+    if (!activeCafe) return;
+    if (!import.meta.env.DEV) {
+      await ApiService.updateEmployee(activeCafe.id, id, compensation);
+    }
+    const updated = employees.map(employee => employee.id === id
+      ? { ...employee, ...compensation }
+      : employee);
+    StorageService.saveEmployees(activeCafe.id, updated);
+    setEmployees(updated);
+    showToast('Employee compensation updated.', 'ok');
+  };
+
   const handleDeleteEmployee = async (id: string) => {
     if (!activeCafe) return;
     if (!import.meta.env.DEV) {
@@ -946,6 +967,7 @@ export default function App() {
             employees={employees}
             currency={activeCafe.currency || 'USD'}
             onAddEmployee={handleAddEmployee}
+            onUpdateCompensation={handleUpdateCompensation}
             onToggleActive={handleToggleActive}
             onDeleteEmployee={handleDeleteEmployee}
           />
