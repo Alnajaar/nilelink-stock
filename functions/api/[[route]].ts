@@ -1155,7 +1155,10 @@ async function workforceRequest(request: Request, env: Env, url: URL): Promise<R
       `SELECT te.id, te.employee_id AS employeeId, e.name AS employeeName, te.branch_id AS branchId, te.clock_in AS clockIn,
         te.clock_out AS clockOut, te.break_minutes AS breakMinutes, te.notes, te.status,
         te.approved_by AS approvedBy, te.approved_at AS approvedAt,
-        e.pay_type AS payType, e.pay_rate_minor AS payRateMinor, e.pay_period AS payPeriod, e.currency
+        COALESCE(te.pay_type, e.pay_type) AS payType,
+        COALESCE(te.pay_rate_minor, e.pay_rate_minor) AS payRateMinor,
+        COALESCE(te.pay_period, e.pay_period) AS payPeriod,
+        COALESCE(te.currency, e.currency) AS currency
        FROM time_entries te JOIN employees e ON e.id = te.employee_id AND e.tenant_id = te.tenant_id
        WHERE te.tenant_id = ? AND te.clock_in >= ? AND te.clock_in < ?
        ORDER BY te.clock_in DESC LIMIT 1000`
@@ -1204,9 +1207,16 @@ async function workforceRequest(request: Request, env: Env, url: URL): Promise<R
       const entryId = id();
       await db.prepare(
         `INSERT INTO time_entries
-         (id, tenant_id, employee_id, branch_id, clock_in, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'open', ?, ?)`
-      ).bind(entryId, user.tenantId, user.employeeId, optionalId(body.branchId), stamp, stamp, stamp).run();
+         (id, tenant_id, employee_id, branch_id, clock_in, status, created_at, updated_at,
+          pay_type, pay_rate_minor, pay_period, currency)
+         SELECT ?, e.tenant_id, e.id, ?, ?, 'open', ?, ?, e.pay_type, e.pay_rate_minor, e.pay_period, e.currency
+         FROM employees e
+         WHERE e.tenant_id = ? AND e.id = ? AND e.active = 1`
+      ).bind(entryId, optionalId(body.branchId), stamp, stamp, stamp, user.tenantId, user.employeeId).run();
+      const createdEntry = await db.prepare(
+        'SELECT id FROM time_entries WHERE id = ? AND tenant_id = ?'
+      ).bind(entryId, user.tenantId).first<{ id: string }>();
+      if (!createdEntry) throw new HttpError(403, 'Active employee record was not found for this account.');
       await audit(db, user.id, user.tenantId, 'time.clock_in', 'time_entry', entryId, { at: stamp });
       return json({ success: true, action: body.action, entryId, timestamp: stamp }, 201);
     }
@@ -1306,8 +1316,10 @@ async function workforceRequest(request: Request, env: Env, url: URL): Promise<R
     }
     await requireTenantRole(request, env, tenantId, ['owner', 'admin']);
     const { results } = await db.prepare(
-      `SELECT e.name, e.role, e.pay_type AS payType, e.pay_rate_minor AS payRateMinor,
-        e.pay_period AS payPeriod, e.currency, te.clock_in AS clockIn, te.clock_out AS clockOut,
+      `SELECT e.name, e.role, COALESCE(te.pay_type, e.pay_type) AS payType,
+        COALESCE(te.pay_rate_minor, e.pay_rate_minor) AS payRateMinor,
+        COALESCE(te.pay_period, e.pay_period) AS payPeriod, COALESCE(te.currency, e.currency) AS currency,
+        te.clock_in AS clockIn, te.clock_out AS clockOut,
         te.break_minutes AS breakMinutes, te.status
        FROM time_entries te JOIN employees e ON e.id = te.employee_id AND e.tenant_id = te.tenant_id
        WHERE te.tenant_id = ? AND te.clock_in >= ? AND te.clock_in < ? AND te.status = 'approved'

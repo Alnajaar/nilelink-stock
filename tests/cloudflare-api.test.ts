@@ -97,6 +97,7 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
   sqlite.exec(await import('node:fs').then(fs => fs.readFileSync('migrations/0002_public_site_controls.sql', 'utf8')));
   sqlite.exec(await import('node:fs').then(fs => fs.readFileSync('migrations/0003_editable_landing_details.sql', 'utf8')));
   sqlite.exec(await import('node:fs').then(fs => fs.readFileSync('migrations/0004_editable_public_page_labels.sql', 'utf8')));
+  sqlite.exec(await import('node:fs').then(fs => fs.readFileSync('migrations/0005_time_entry_compensation_snapshot.sql', 'utf8')));
   const migratedContentRow = sqlite.prepare(
     'SELECT published_json FROM site_content WHERE id = ?'
   ).get('landing') as { published_json: string };
@@ -399,6 +400,10 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
     assert.equal(pinLogin.status, 200);
     const pinCookie = pinLogin.headers.get('set-cookie')?.split(';')[0];
     assert.ok(pinCookie);
+    sqlite.prepare(
+      `UPDATE employees SET pay_type = 'hourly', pay_rate_minor = 1250, pay_period = 'monthly', currency = 'USD'
+       WHERE tenant_id = ? AND user_id = (SELECT id FROM users WHERE email = 'owner@example.com')`
+    ).run(registrationData.tenant.id);
 
     const clockIn = await call('/api/workforce/clock', 'POST', {
       tenantId: registrationData.tenant.id,
@@ -475,6 +480,10 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
     }, cookie);
     assert.equal(duplicateApproval.status, 404);
 
+    sqlite.prepare(
+      `UPDATE employees SET pay_rate_minor = 9999
+       WHERE tenant_id = ? AND user_id = (SELECT id FROM users WHERE email = 'owner@example.com')`
+    ).run(registrationData.tenant.id);
     const exportResponse = await call(
       `/api/workforce/payroll/export?tenantId=${registrationData.tenant.id}&from=${today}&to=${today}`,
       'GET',
@@ -484,6 +493,11 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
     const csv = await exportResponse.text();
     assert.equal(exportResponse.status, 200);
     assert.match(csv, /"'=SUM\(1,1\)"/);
+    const correctedHours = Math.round(
+      (correctionEnd.getTime() - Date.parse(correctionStart)) / 36_000
+    ) / 100;
+    const expectedGrossMinor = Math.round(correctedHours * 1250);
+    assert.match(csv, new RegExp(`,"1250","${expectedGrossMinor}","USD"$`));
     assert.equal((await call('/api/tenants', 'GET', undefined, pinCookie)).status, 200);
 
     const totp = await currentTotp(env.BOOTSTRAP_ADMIN_TOTP_SECRET);
