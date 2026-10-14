@@ -190,7 +190,16 @@ export class ApiService {
   public static async getPublicContent(): Promise<PublicSiteContent> {
     const response = await fetch(`${this.baseUrl}/content`);
     const data = await this.readResponse<{ content: PublicSiteContent }>(response);
-    const content = data.content;
+    return this.validatePublicSiteContent(data.content);
+  }
+
+  public static async getAdminContentDraft(): Promise<PublicSiteContent> {
+    const response = await fetch(`${this.baseUrl}/content/draft`, { credentials: 'same-origin' });
+    const data = await this.readResponse<{ content: PublicSiteContent }>(response);
+    return this.validatePublicSiteContent(data.content);
+  }
+
+  private static validatePublicSiteContent(content: PublicSiteContent): PublicSiteContent {
     if (!content || typeof content.brandName !== 'string' || typeof content.logoUrl !== 'string' ||
         typeof content.tagline !== 'string' || typeof content.heroEyebrow !== 'string' ||
         typeof content.headline !== 'string' || typeof content.description !== 'string' ||

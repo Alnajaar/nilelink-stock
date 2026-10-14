@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ShieldAlert,
   Building2,
@@ -33,6 +33,7 @@ interface SuperAdminPortalProps {
   onSaveTenants: (tenants: CafeTenant[]) => Promise<void>;
   onSavePlans: (plans: SubscriptionPlan[]) => Promise<void>;
   publicContent: PublicSiteContent;
+  onLoadPublicContentDraft: () => Promise<PublicSiteContent>;
   onSavePublicContent: (content: PublicSiteContent, publish: boolean) => Promise<void>;
   onChangePassword: (currentPassword: string, newPassword: string, totp: string) => Promise<void>;
   onSelectCafe: (tenant: CafeTenant) => void;
@@ -46,6 +47,7 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
   onSaveTenants,
   onSavePlans,
   publicContent,
+  onLoadPublicContentDraft,
   onSavePublicContent,
   onChangePassword,
   onSelectCafe,
@@ -80,15 +82,29 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
   const [editingPlan, setEditingPlan] = useState<SubscriptionPlan | null>(null);
   const [contentDraft, setContentDraft] = useState(publicContent);
   const [isSavingContent, setIsSavingContent] = useState(false);
+  const [isLoadingContentDraft, setIsLoadingContentDraft] = useState(true);
+  const [contentDraftError, setContentDraftError] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [passwordTotp, setPasswordTotp] = useState('');
   const [isSavingPassword, setIsSavingPassword] = useState(false);
 
+  const loadContentDraft = useCallback(async () => {
+    setIsLoadingContentDraft(true);
+    setContentDraftError('');
+    try {
+      setContentDraft(await onLoadPublicContentDraft());
+    } catch (error) {
+      setContentDraftError(error instanceof Error ? error.message : 'Could not load the saved website draft.');
+    } finally {
+      setIsLoadingContentDraft(false);
+    }
+  }, [onLoadPublicContentDraft]);
+
   useEffect(() => {
-    setContentDraft(publicContent);
-  }, [publicContent]);
+    void loadContentDraft();
+  }, [loadContentDraft]);
 
   const updateContentField = <K extends keyof PublicSiteContent>(key: K, value: PublicSiteContent[K]) => {
     setContentDraft(current => ({ ...current, [key]: value }));
@@ -600,6 +616,17 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
             <h3 className="text-base font-bold text-slate-900">Public website content and branding</h3>
             <p className="text-xs text-slate-500 mt-1">Manage the public home page, pricing copy, feature cards, brand, and logo. Plan names, prices, limits, and included features are managed in Subscription Plans. Drafts stay private until published.</p>
           </div>
+          {isLoadingContentDraft && (
+            <p role="status" className="text-xs text-slate-500">Loading saved private draft…</p>
+          )}
+          {contentDraftError && (
+            <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800">
+              {contentDraftError}{' '}
+              <button type="button" onClick={() => void loadContentDraft()} className="font-bold underline">
+                Retry
+              </button>
+            </p>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label className="block text-xs font-semibold text-slate-700">
               Brand name
@@ -860,11 +887,11 @@ export const SuperAdminPortal: React.FC<SuperAdminPortalProps> = ({
             </label>
           </div>
           <div className="flex flex-wrap justify-end gap-2">
-            <button disabled={isSavingContent} onClick={() => handleSaveContent(false)}
+            <button disabled={isSavingContent || isLoadingContentDraft || Boolean(contentDraftError)} onClick={() => handleSaveContent(false)}
               className="rounded-xl border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-700 disabled:opacity-50">
               Save draft
             </button>
-            <button disabled={isSavingContent} onClick={() => handleSaveContent(true)}
+            <button disabled={isSavingContent || isLoadingContentDraft || Boolean(contentDraftError)} onClick={() => handleSaveContent(true)}
               className="rounded-xl bg-amber-600 px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50">
               Publish changes
             </button>

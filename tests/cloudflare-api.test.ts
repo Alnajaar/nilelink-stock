@@ -489,6 +489,51 @@ test('Cloudflare API registration, PIN timekeeping, approval, and CSV export wor
       cookie
     );
     assert.equal(((await cappedInventory.json()) as { items: unknown[] }).items.length, 1);
+    const draftSave = await call('/api/content', 'PUT', {
+      publish: false,
+      content: {
+        ...DEFAULT_PUBLIC_SITE_CONTENT,
+        headline: 'Private draft headline'
+      }
+    }, adminCookie);
+    assert.equal(draftSave.status, 200);
+    const adminDraft = await call('/api/content/draft', 'GET', undefined, adminCookie);
+    assert.equal(adminDraft.status, 200);
+    assert.equal(((await adminDraft.json()) as { content: { headline: string } }).content.headline, 'Private draft headline');
+    const publicContentBeforePublish = await call('/api/content');
+    assert.notEqual(
+      ((await publicContentBeforePublish.json()) as { content: { headline: string } }).content.headline,
+      'Private draft headline'
+    );
+    assert.equal((await call('/api/content/draft')).status, 401);
+    assert.equal((await call('/api/content/draft', 'GET', undefined, cookie)).status, 403);
+    const largeContent = {
+      ...DEFAULT_PUBLIC_SITE_CONTENT,
+      featureCards: Array.from({ length: 12 }, (_, index) => ({
+        title: `Feature ${index} `.padEnd(120, 'x'),
+        description: 'd'.repeat(500)
+      })),
+      marketingMetrics: Array.from({ length: 6 }, () => ({ value: 'v'.repeat(40), label: 'l'.repeat(120) })),
+      multiBranchBenefits: Array.from({ length: 8 }, () => ({ title: 't'.repeat(120), description: 'd'.repeat(500) })),
+      branchPreview: {
+        organizationName: 'x'.repeat(180),
+        activeBranchesLabel: 'x'.repeat(180),
+        flagshipName: 'x'.repeat(180),
+        flagshipDetails: 'x'.repeat(180),
+        secondBranchName: 'x'.repeat(180),
+        secondBranchDetails: 'x'.repeat(180),
+        singleBranchNotice: 'x'.repeat(180),
+        singleBranchName: 'x'.repeat(180),
+        singleBranchDetails: 'x'.repeat(180)
+      }
+    };
+    assert.ok(Buffer.byteLength(JSON.stringify({ content: largeContent, publish: false })) > 16_384);
+    assert.ok(Buffer.byteLength(JSON.stringify({ content: largeContent, publish: false })) < 32_768);
+    const largeDraftSave = await call('/api/content', 'PUT', {
+      publish: false,
+      content: largeContent
+    }, adminCookie);
+    assert.equal(largeDraftSave.status, 200, await largeDraftSave.clone().text());
     const contentUpdate = await call('/api/content', 'PUT', {
       publish: true,
       content: {

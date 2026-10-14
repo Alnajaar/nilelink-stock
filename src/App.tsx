@@ -55,6 +55,18 @@ export default function App() {
   const [activeCafe, setActiveCafe] = useState<CafeTenant | null>(null);
   const [plans, setPlans] = useState<SubscriptionPlan[]>(DEFAULT_SUBSCRIPTION_PLANS);
   const [publicContent, setPublicContent] = useState<PublicSiteContent>(DEFAULT_PUBLIC_SITE_CONTENT);
+  const loadAdminPublicContentDraft = useCallback(
+    () => ApiService.getAdminContentDraft(),
+    []
+  );
+  useEffect(() => {
+    document.title = `${publicContent.brandName} - ${publicContent.tagline}`;
+    document.querySelector('meta[name="description"]')?.setAttribute('content', publicContent.description);
+    document.querySelector('meta[property="og:title"]')?.setAttribute('content', document.title);
+    document.querySelector('meta[property="og:description"]')?.setAttribute('content', publicContent.description);
+    document.querySelector('meta[name="apple-mobile-web-app-title"]')?.setAttribute('content', publicContent.brandName);
+    document.querySelector<HTMLLinkElement>('link[rel="icon"]')?.setAttribute('href', publicContent.logoUrl || '/icon.svg');
+  }, [publicContent]);
   const [license, setLicense] = useState(LicenseManager.getLicenseStatus('nile-flagship', 'Demo Specialty Roastery'));
 
   // Authenticated User
@@ -693,6 +705,7 @@ export default function App() {
           tenants={tenants}
           plans={plans}
           publicContent={publicContent}
+          onLoadPublicContentDraft={loadAdminPublicContentDraft}
           onSavePublicContent={async (content, publish) => {
             await ApiService.savePublicContent(content, publish);
             if (publish) setPublicContent(content);
@@ -947,6 +960,7 @@ export default function App() {
             tenants={tenants}
             plans={plans}
             publicContent={publicContent}
+            onLoadPublicContentDraft={loadAdminPublicContentDraft}
             onSavePublicContent={async (content, publish) => {
               await ApiService.savePublicContent(content, publish);
               if (publish) setPublicContent(content);

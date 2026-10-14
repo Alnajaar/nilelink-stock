@@ -123,6 +123,16 @@ export async function onRequest(context: {
       return json({ success: true, content: JSON.parse(content.content), version: content.version });
     }
 
+    if (url.pathname === '/api/content/draft' && request.method === 'GET') {
+      const user = await requireSession(request, env);
+      requireRole(user, ['platform_admin']);
+      const content = await requireDatabase(env).prepare(
+        'SELECT draft_json AS content, version FROM site_content WHERE id = ?'
+      ).bind('landing').first<{ content: string; version: number }>();
+      if (!content) throw new HttpError(404, 'Site content was not found.');
+      return json({ success: true, content: JSON.parse(content.content), version: content.version });
+    }
+
     if (url.pathname === '/api/tenant/lookup' && request.method === 'GET') {
       const tenantId = url.searchParams.get('tenantId') || '';
       if (!/^[0-9a-f-]{36}$/i.test(tenantId)) throw new HttpError(404, 'Workspace was not found.');
@@ -457,7 +467,7 @@ async function createPlan(db: D1Database, request: Request, actor: Authenticated
 }
 
 async function updateContent(db: D1Database, request: Request, actor: AuthenticatedUser): Promise<Response> {
-  const body = await readJson<{ content?: unknown; publish?: unknown }>(request, 16_384);
+  const body = await readJson<{ content?: unknown; publish?: unknown }>(request, 32_768);
   if (!body.content || typeof body.content !== 'object' || Array.isArray(body.content)) {
     throw new HttpError(400, 'Content must be an object.');
   }
